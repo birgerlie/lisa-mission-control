@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { taskDb, CreateTaskInput, UpdateTaskInput } from '@/lib/db';
 import { sendWebhook, buildWebhookPayload, webhookLogDb } from '@/lib/webhook';
+import { TaskStatus } from '@/lib/types';
 
 // GET /api/tasks - List all tasks
 export async function GET(request: NextRequest) {
@@ -9,8 +10,10 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status') as CreateTaskInput['status'] | null;
     const assignee = searchParams.get('assignee');
 
-    const filters: { status?: string; assignee?: string } = {};
-    if (status) filters.status = status;
+    const filters: { status?: TaskStatus; assignee?: string } = {};
+    if (status && ['backlog', 'in-progress', 'review', 'done'].includes(status)) {
+      filters.status = status as TaskStatus;
+    }
     if (assignee) filters.assignee = assignee;
 
     const hasFilters = Object.keys(filters).length > 0;
