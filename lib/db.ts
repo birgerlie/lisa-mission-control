@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { TaskStatus, Priority } from './types';
 
@@ -35,294 +35,335 @@ export interface UpdateTaskInput {
   assignee?: string;
 }
 
-// Lazy database initialization for Vercel compatibility
-let dbInstance: Database.Database | null = null;
+// PostgreSQL connection pool
+let pool: Pool | null = null;
 
-function getDb(): Database.Database {
-  if (dbInstance) return dbInstance;
+function getPool(): Pool {
+  if (pool) return pool;
   
-  // Skip database initialization during build/static generation
-  if (process.env.NEXT_PHASE === 'phase-production-build' || 
-      process.env.VERCEL_ENV === 'production' && !process.env.DATABASE_PATH) {
-    // Return a mock for build time
-    throw new Error('Database not available during build');
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error('DATABASE_URL environment variable is not set');
   }
   
-  const dbPath = process.env.DATABASE_PATH || './data/mission-control.db';
-  dbInstance = new Database(dbPath);
-  dbInstance.pragma('journal_mode = WAL');
-  initializeSchema(dbInstance);
+  pool = new Pool({
+    connectionString,
+    ssl: {
+      rejectUnauthorized: false // Required for Supabase
+    }
+  });
   
-  return dbInstance;
+  return pool;
 }
 
-function initializeSchema(db: Database.Database): void {
-  // Tasks table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS tasks (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      description TEXT,
-      status TEXT NOT NULL DEFAULT 'pending',
-      priority TEXT NOT NULL DEFAULT 'medium',
-      assignee TEXT NOT NULL DEFAULT 'Lisa',
-      createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL,
-      webhookAttempts INTEGER NOT NULL DEFAULT 0,
-      lastWebhookError TEXT,
-      webhookDeliveredAt TEXT
-    )
-  `);
-
-  // Webhook delivery log table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS webhook_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      taskId TEXT NOT NULL,
-      status TEXT NOT NULL,
-      error TEXT,
-      createdAt TEXT NOT NULL,
-      FOREIGN KEY (taskId) REFERENCES tasks(id) ON DELETE CASCADE
-    )
-  `);
-
-  // Create indexes for common queries
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-    CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(createdAt);
-    CREATE INDEX IF NOT EXISTS idx_tasks_webhook_attempts ON tasks(webhookAttempts);
-    CREATE INDEX IF NOT EXISTS idx_webhook_logs_task_id ON webhook_logs(taskId);
-  `);
-}
-
-// Initialize on module load (only in development)
-if (process.env.NODE_ENV === 'development') {
+// Initialize database schema
+export async function initializeDatabase(): Promise<void> {
+  const client = await getPool().connect();
   try {
-    getDb();
-  } catch {
-    // Ignore during build
+    // Tasks table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        status TEXT NOT NULL DEFAULT 'backlog',
+        priority TEXT NOT NULL DEFAULT 'medium',
+        assignee TEXT NOT NULL DEFAULT 'Lisa',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        webhook_attempts INTEGER NOT NULL DEFAULT 0,
+        last_webhook_error TEXT,
+        webhook_delivered_at TIMESTAMP WITH TIME ZONE
+      )
+    `);
+
+    // Webhook delivery log table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS webhook_logs (
+        id SERIAL PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        status TEXT NOT NULL,
+        error TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+
+    // Create indexes
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+      CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at);
+      CREATE INDEX IF NOT EXISTS idx_tasks_webhook_attempts ON tasks(webhook_attempts);
+      CREATE INDEX IF NOT EXISTS idx_webhook_logs_task_id ON webhook_logs(task_id);
+    `);
+  } finally {
+    client.release();
   }
 }
 
 // Task operations
 export const taskDb = {
   // Create a new task
-  create(input: CreateTaskInput): Task {
-    const db = getDb();
-    const id = uuidv4();
-    const now = new Date().toISOString();
-    
-    const stmt = db.prepare(`
-      INSERT INTO tasks (id, title, description, status, priority, assignee, createdAt, updatedAt, webhookAttempts)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
-    `);
-    
-    stmt.run(
-      id,
-      input.title,
-      input.description || null,
-      'pending',
-      input.priority || 'medium',
-      input.assignee || 'Lisa',
-      now,
-      now
-    );
-    
-    return this.getById(id)!;
+  async create(input: CreateTaskInput): Promise<Task> {
+    const client = await getPool().connect();
+    try {
+      const id = uuidv4();
+      const now = new Date().toISOString();
+      
+      const result = await client.query(
+        `INSERT INTO tasks (id, title, description, status, priority, assignee, created_at, updated_at, webhook_attempts)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0)
+         RETURNING *`,
+        [
+          id,
+          input.title,
+          input.description || null,
+          'backlog',
+          input.priority || 'medium',
+          input.assignee || 'Lisa',
+          now,
+          now
+        ]
+      );
+      
+      return mapRowToTask(result.rows[0]);
+    } finally {
+      client.release();
+    }
   },
 
   // Get task by ID
-  getById(id: string): Task | null {
-    const db = getDb();
-    const stmt = db.prepare('SELECT * FROM tasks WHERE id = ?');
-    const row = stmt.get(id) as Task | undefined;
-    return row || null;
+  async getById(id: string): Promise<Task | null> {
+    const client = await getPool().connect();
+    try {
+      const result = await client.query('SELECT * FROM tasks WHERE id = $1', [id]);
+      return result.rows[0] ? mapRowToTask(result.rows[0]) : null;
+    } finally {
+      client.release();
+    }
   },
 
   // Get all tasks with optional filtering
-  getAll(filters?: { status?: TaskStatus; assignee?: string }): Task[] {
-    const db = getDb();
-    let query = 'SELECT * FROM tasks WHERE 1=1';
-    const params: (string | number)[] = [];
+  async getAll(filters?: { status?: TaskStatus; assignee?: string }): Promise<Task[]> {
+    const client = await getPool().connect();
+    try {
+      let query = 'SELECT * FROM tasks WHERE 1=1';
+      const params: (string | number)[] = [];
+      let paramIndex = 1;
 
-    if (filters?.status) {
-      query += ' AND status = ?';
-      params.push(filters.status);
+      if (filters?.status) {
+        query += ` AND status = $${paramIndex}`;
+        params.push(filters.status);
+        paramIndex++;
+      }
+
+      if (filters?.assignee) {
+        query += ` AND assignee = $${paramIndex}`;
+        params.push(filters.assignee);
+        paramIndex++;
+      }
+
+      query += ' ORDER BY created_at DESC';
+
+      const result = await client.query(query, params);
+      return result.rows.map(mapRowToTask);
+    } finally {
+      client.release();
     }
-
-    if (filters?.assignee) {
-      query += ' AND assignee = ?';
-      params.push(filters.assignee);
-    }
-
-    query += ' ORDER BY createdAt DESC';
-
-    const stmt = db.prepare(query);
-    return stmt.all(...params) as Task[];
   },
 
   // Update task
-  update(id: string, input: UpdateTaskInput): Task | null {
-    const existing = this.getById(id);
-    if (!existing) return null;
+  async update(id: string, input: UpdateTaskInput): Promise<Task | null> {
+    const client = await getPool().connect();
+    try {
+      const existing = await this.getById(id);
+      if (!existing) return null;
 
-    const db = getDb();
-    const updates: string[] = [];
-    const values: (string | number | null)[] = [];
+      const updates: string[] = [];
+      const values: (string | number | null)[] = [];
+      let paramIndex = 1;
 
-    if (input.status !== undefined) {
-      updates.push('status = ?');
-      values.push(input.status);
-    }
-    if (input.title !== undefined) {
-      updates.push('title = ?');
-      values.push(input.title);
-    }
-    if (input.description !== undefined) {
-      updates.push('description = ?');
-      values.push(input.description || null);
-    }
-    if (input.priority !== undefined) {
-      updates.push('priority = ?');
-      values.push(input.priority);
-    }
-    if (input.assignee !== undefined) {
-      updates.push('assignee = ?');
-      values.push(input.assignee);
-    }
+      if (input.status !== undefined) {
+        updates.push(`status = $${paramIndex}`);
+        values.push(input.status);
+        paramIndex++;
+      }
+      if (input.title !== undefined) {
+        updates.push(`title = $${paramIndex}`);
+        values.push(input.title);
+        paramIndex++;
+      }
+      if (input.description !== undefined) {
+        updates.push(`description = $${paramIndex}`);
+        values.push(input.description || null);
+        paramIndex++;
+      }
+      if (input.priority !== undefined) {
+        updates.push(`priority = $${paramIndex}`);
+        values.push(input.priority);
+        paramIndex++;
+      }
+      if (input.assignee !== undefined) {
+        updates.push(`assignee = $${paramIndex}`);
+        values.push(input.assignee);
+        paramIndex++;
+      }
 
-    updates.push('updatedAt = ?');
-    values.push(new Date().toISOString());
-    values.push(id);
+      updates.push(`updated_at = $${paramIndex}`);
+      values.push(new Date().toISOString());
+      paramIndex++;
 
-    const stmt = db.prepare(`
-      UPDATE tasks SET ${updates.join(', ')} WHERE id = ?
-    `);
-    
-    stmt.run(...values);
-    return this.getById(id);
+      values.push(id);
+
+      const result = await client.query(
+        `UPDATE tasks SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+        values
+      );
+      
+      return result.rows[0] ? mapRowToTask(result.rows[0]) : null;
+    } finally {
+      client.release();
+    }
   },
 
   // Delete task
-  delete(id: string): boolean {
-    const db = getDb();
-    const stmt = db.prepare('DELETE FROM tasks WHERE id = ?');
-    const result = stmt.run(id);
-    return result.changes > 0;
+  async delete(id: string): Promise<boolean> {
+    const client = await getPool().connect();
+    try {
+      const result = await client.query('DELETE FROM tasks WHERE id = $1', [id]);
+      return (result.rowCount ?? 0) > 0;
+    } finally {
+      client.release();
+    }
   },
 
-  // Get tasks that need polling (webhook failed, pending for >2 minutes)
-  getTasksNeedingPolling(minutesOld: number = 2): Task[] {
-    const db = getDb();
-    const cutoffTime = new Date(Date.now() - minutesOld * 60 * 1000).toISOString();
-    
-    const stmt = db.prepare(`
-      SELECT * FROM tasks 
-      WHERE status = 'pending' 
-        AND createdAt < ? 
-        AND webhookAttempts >= 1
-        AND webhookDeliveredAt IS NULL
-      ORDER BY createdAt ASC
-    `);
-    
-    return stmt.all(cutoffTime) as Task[];
+  // Get tasks that need polling
+  async getTasksNeedingPolling(minutesOld: number = 2): Promise<Task[]> {
+    const client = await getPool().connect();
+    try {
+      const cutoffTime = new Date(Date.now() - minutesOld * 60 * 1000).toISOString();
+      
+      const result = await client.query(
+        `SELECT * FROM tasks 
+         WHERE status = 'backlog' 
+           AND created_at < $1 
+           AND webhook_attempts >= 1
+           AND webhook_delivered_at IS NULL
+         ORDER BY created_at ASC`,
+        [cutoffTime]
+      );
+      
+      return result.rows.map(mapRowToTask);
+    } finally {
+      client.release();
+    }
   },
 
   // Increment webhook attempt counter
-  incrementWebhookAttempt(id: string, error?: string): void {
-    const db = getDb();
-    const stmt = db.prepare(`
-      UPDATE tasks 
-      SET webhookAttempts = webhookAttempts + 1,
-          lastWebhookError = ?
-      WHERE id = ?
-    `);
-    
-    stmt.run(error || null, id);
+  async incrementWebhookAttempt(id: string, error?: string): Promise<void> {
+    const client = await getPool().connect();
+    try {
+      await client.query(
+        `UPDATE tasks 
+         SET webhook_attempts = webhook_attempts + 1,
+             last_webhook_error = $1
+         WHERE id = $2`,
+        [error || null, id]
+      );
+    } finally {
+      client.release();
+    }
   },
 
   // Mark webhook as delivered
-  markWebhookDelivered(id: string): void {
-    const db = getDb();
-    const stmt = db.prepare(`
-      UPDATE tasks 
-      SET webhookDeliveredAt = ?,
-          lastWebhookError = NULL
-      WHERE id = ?
-    `);
-    
-    stmt.run(new Date().toISOString(), id);
+  async markWebhookDelivered(id: string): Promise<void> {
+    const client = await getPool().connect();
+    try {
+      await client.query(
+        `UPDATE tasks 
+         SET webhook_delivered_at = NOW(),
+             last_webhook_error = NULL
+         WHERE id = $1`,
+        [id]
+      );
+    } finally {
+      client.release();
+    }
   },
 };
 
 // Webhook log operations
 export const webhookLogDb = {
   // Log a webhook attempt
-  log(taskId: string, status: 'success' | 'failed', error?: string): void {
-    const db = getDb();
-    const stmt = db.prepare(`
-      INSERT INTO webhook_logs (taskId, status, error, createdAt)
-      VALUES (?, ?, ?, ?)
-    `);
-    
-    stmt.run(taskId, status, error || null, new Date().toISOString());
+  async log(taskId: string, status: 'success' | 'failed', error?: string): Promise<void> {
+    const client = await getPool().connect();
+    try {
+      await client.query(
+        `INSERT INTO webhook_logs (task_id, status, error, created_at)
+         VALUES ($1, $2, $3, NOW())`,
+        [taskId, status, error || null]
+      );
+    } finally {
+      client.release();
+    }
   },
 
   // Get logs for a task
-  getLogsForTask(taskId: string): Array<{
+  async getLogsForTask(taskId: string): Promise<Array<{
     id: number;
     taskId: string;
     status: string;
     error: string | null;
     createdAt: string;
-  }> {
-    const db = getDb();
-    const stmt = db.prepare(`
-      SELECT * FROM webhook_logs 
-      WHERE taskId = ? 
-      ORDER BY createdAt DESC
-    `);
-    
-    return stmt.all(taskId) as Array<{
-      id: number;
-      taskId: string;
-      status: string;
-      error: string | null;
-      createdAt: string;
-    }>;
+  }>> {
+    const client = await getPool().connect();
+    try {
+      const result = await client.query(
+        `SELECT id, task_id as "taskId", status, error, created_at as "createdAt"
+         FROM webhook_logs 
+         WHERE task_id = $1 
+         ORDER BY created_at DESC`,
+        [taskId]
+      );
+      return result.rows;
+    } finally {
+      client.release();
+    }
   },
 
   // Get recent logs
-  getRecentLogs(limit: number = 100): Array<{
+  async getRecentLogs(limit: number = 100): Promise<Array<{
     id: number;
     taskId: string;
     status: string;
     error: string | null;
     createdAt: string;
-  }> {
-    const db = getDb();
-    const stmt = db.prepare(`
-      SELECT * FROM webhook_logs 
-      ORDER BY createdAt DESC
-      LIMIT ?
-    `);
-    
-    return stmt.all(limit) as Array<{
-      id: number;
-      taskId: string;
-      status: string;
-      error: string | null;
-      createdAt: string;
-    }>;
+  }>> {
+    const client = await getPool().connect();
+    try {
+      const result = await client.query(
+        `SELECT id, task_id as "taskId", status, error, created_at as "createdAt"
+         FROM webhook_logs 
+         ORDER BY created_at DESC
+         LIMIT $1`,
+        [limit]
+      );
+      return result.rows;
+    } finally {
+      client.release();
+    }
   },
 };
 
 // Health check
-export function checkDatabaseHealth(): { healthy: boolean; message: string } {
+export async function checkDatabaseHealth(): Promise<{ healthy: boolean; message: string }> {
   try {
-    const db = getDb();
-    db.prepare('SELECT 1').get();
-    return { healthy: true, message: 'Database connection is healthy' };
+    const client = await getPool().connect();
+    try {
+      await client.query('SELECT 1');
+      return { healthy: true, message: 'Database connection is healthy' };
+    } finally {
+      client.release();
+    }
   } catch (error) {
     return { 
       healthy: false, 
@@ -331,5 +372,27 @@ export function checkDatabaseHealth(): { healthy: boolean; message: string } {
   }
 }
 
-export { getDb as db };
-export default getDb;
+// Helper function to map PostgreSQL row to Task interface
+function mapRowToTask(row: any): Task {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    status: row.status,
+    priority: row.priority,
+    assignee: row.assignee,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    webhookAttempts: row.webhook_attempts,
+    lastWebhookError: row.last_webhook_error,
+    webhookDeliveredAt: row.webhook_delivered_at,
+  };
+}
+
+// Initialize on module load
+if (typeof window === 'undefined') {
+  initializeDatabase().catch(console.error);
+}
+
+export { getPool as db };
+export default getPool;

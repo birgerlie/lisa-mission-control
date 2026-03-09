@@ -13,7 +13,7 @@ import { webhookConfig } from '@/lib/webhook';
  */
 export async function GET() {
   try {
-    const dbHealth = checkDatabaseHealth();
+    const dbHealth = await checkDatabaseHealth();
     
     return NextResponse.json({
       status: dbHealth.healthy ? 'healthy' : 'unhealthy',

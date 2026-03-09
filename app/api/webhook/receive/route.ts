@@ -5,28 +5,14 @@ import { taskDb, webhookLogDb } from '@/lib/db';
 /**
  * POST /api/webhook/receive
  * Receives webhooks from Lisa (clawdbot)
- * 
- * Expected payload:
- * {
- *   taskId: string;
- *   title: string;
- *   description?: string;
- *   priority: string;
- *   status?: string;
- * }
- * 
- * Headers:
- *   Authorization: Bearer <WEBHOOK_SECRET>
- *   Content-Type: application/json
  */
 export async function POST(request: NextRequest) {
   try {
-    // Rate limiting - limit by IP address
     const clientIp = request.headers.get('x-forwarded-for') || 
                      request.headers.get('x-real-ip') || 
                      'unknown';
     
-    const rateLimit = checkRateLimit(clientIp, 60, 60000); // 60 requests per minute
+    const rateLimit = checkRateLimit(clientIp, 60, 60000);
     
     if (!rateLimit.allowed) {
       return NextResponse.json(
@@ -46,7 +32,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify authorization
     const authHeader = request.headers.get('authorization');
     
     if (!verifyWebhookAuth(authHeader)) {
@@ -56,7 +41,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Parse body
     let body;
     try {
       body = await request.json();
@@ -67,7 +51,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate required fields
     if (!body.taskId || typeof body.taskId !== 'string') {
       return NextResponse.json(
         { success: false, error: 'taskId is required' },
@@ -75,8 +58,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find the task
-    const task = taskDb.getById(body.taskId);
+    const task = await taskDb.getById(body.taskId);
     
     if (!task) {
       return NextResponse.json(
@@ -85,9 +67,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Update task status if provided
     if (body.status) {
-      const validStatuses = ['pending', 'in-progress', 'review', 'done'];
+      const validStatuses = ['backlog', 'in-progress', 'review', 'done'];
       
       if (!validStatuses.includes(body.status)) {
         return NextResponse.json(
@@ -96,14 +77,12 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      taskDb.update(body.taskId, { status: body.status });
+      await taskDb.update(body.taskId, { status: body.status });
     }
 
-    // Mark webhook as delivered
-    taskDb.markWebhookDelivered(body.taskId);
-    webhookLogDb.log(body.taskId, 'success', 'Received confirmation from Lisa');
+    await taskDb.markWebhookDelivered(body.taskId);
+    await webhookLogDb.log(body.taskId, 'success', 'Received confirmation from Lisa');
 
-    // Return success
     return NextResponse.json({
       success: true,
       message: 'Webhook received and processed',
@@ -119,10 +98,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/**
- * GET /api/webhook/receive
- * Health check endpoint for webhook receiver
- */
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
   const isAuthenticated = verifyWebhookAuth(authHeader);

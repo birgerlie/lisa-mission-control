@@ -11,7 +11,7 @@ export async function PATCH(
     const body = await request.json();
 
     // Check if task exists
-    const existingTask = taskDb.getById(id);
+    const existingTask = await taskDb.getById(id);
     if (!existingTask) {
       return NextResponse.json(
         { success: false, error: 'Task not found' },
@@ -23,7 +23,7 @@ export async function PATCH(
     const updates: UpdateTaskInput = {};
 
     if (body.status !== undefined) {
-      const validStatuses = ['pending', 'in-progress', 'review', 'done'];
+      const validStatuses = ['backlog', 'in-progress', 'review', 'done'];
       if (!validStatuses.includes(body.status)) {
         return NextResponse.json(
           { success: false, error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` },
@@ -63,7 +63,7 @@ export async function PATCH(
     }
 
     // Apply updates
-    const updatedTask = taskDb.update(id, updates);
+    const updatedTask = await taskDb.update(id, updates);
 
     return NextResponse.json({ success: true, task: updatedTask });
   } catch (error) {
@@ -84,7 +84,7 @@ export async function DELETE(
     const { id } = params;
 
     // Check if task exists
-    const existingTask = taskDb.getById(id);
+    const existingTask = await taskDb.getById(id);
     if (!existingTask) {
       return NextResponse.json(
         { success: false, error: 'Task not found' },
@@ -93,7 +93,7 @@ export async function DELETE(
     }
 
     // Delete task
-    const deleted = taskDb.delete(id);
+    const deleted = await taskDb.delete(id);
 
     if (!deleted) {
       return NextResponse.json(
@@ -119,7 +119,7 @@ export async function GET(
 ) {
   try {
     const { id } = params;
-    const task = taskDb.getById(id);
+    const task = await taskDb.getById(id);
 
     if (!task) {
       return NextResponse.json(

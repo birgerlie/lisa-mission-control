@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { Task, CronJob, AgentSession, MemoryFile, Document } from '../types';
 import { DataService } from './dataService';
+import { taskDb } from '../db';
 
 const WORKSPACE_ROOT = '/Users/birgerlie/clawd';
 const MEMORY_DIR = path.join(WORKSPACE_ROOT, 'memory');
@@ -14,31 +15,25 @@ const EXCLUDED_FILES = ['node_modules', '.git', '.next', 'package-lock.json'];
 const EXCLUDED_EXTENSIONS = ['.log', '.tmp', '.lock'];
 
 export class FileSystemDataService implements DataService {
-  private tasks: Task[] = [];
-
-  constructor(initialTasks: Task[] = []) {
-    this.tasks = initialTasks;
-  }
-
   async getTasks(): Promise<Task[]> {
-    return [...this.tasks];
+    return await taskDb.getAll();
   }
 
   async updateTaskStatus(taskId: string, status: Task['status']): Promise<void> {
-    const taskIndex = this.tasks.findIndex(t => t.id === taskId);
-    if (taskIndex === -1) {
+    const task = await taskDb.getById(taskId);
+    if (!task) {
       throw new Error(`Task not found: ${taskId}`);
     }
-    this.tasks[taskIndex] = { ...this.tasks[taskIndex], status };
+    await taskDb.update(taskId, { status });
   }
 
   async createTask(taskData: Omit<Task, 'id' | 'createdAt'>): Promise<Task> {
-    const newTask: Task = {
-      ...taskData,
-      id: this.generateId(),
-      createdAt: this.getCurrentDateString(),
-    };
-    this.tasks.push(newTask);
+    const newTask = await taskDb.create({
+      title: taskData.title,
+      description: taskData.description,
+      priority: taskData.priority,
+      assignee: taskData.assignee,
+    });
     return newTask;
   }
 
@@ -50,79 +45,139 @@ export class FileSystemDataService implements DataService {
     return this.createMockAgentSessions();
   }
 
-  async killAgentSession(_sessionId: string): Promise<boolean> {
-    return true;
-  }
-
-  async restartAgentSession(_sessionId: string): Promise<boolean> {
-    return true;
-  }
-
   async getMemoryFiles(): Promise<MemoryFile[]> {
+    return this.readMemoryFiles();
+  }
+
+  async getDocuments(): Promise<Document[]> {
+    return this.scanDocuments();
+  }
+
+  private async readMemoryFiles(): Promise<MemoryFile[]> {
     try {
       const files = await readdirAsync(MEMORY_DIR);
-      const memoryFiles = await this.parseMemoryFiles(files);
-      return this.sortMemoryFilesByDate(memoryFiles);
+      const memoryFiles: MemoryFile[] = [];
+
+      for (const file of files) {
+        if (file.endsWith('.md')) {
+          const filePath = path.join(MEMORY_DIR, file);
+          try {
+            const content = await readFileAsync(filePath, 'utf-8');
+            const stats = await statAsync(filePath);
+            
+            memoryFiles.push({
+              date: path.basename(file, '.md'),
+              filename: file,
+              content,
+              lastModified: stats.mtime,
+            });
+          } catch {
+            // Skip files that can't be read
+          }
+        }
+      }
+
+      return memoryFiles.sort((a, b) => 
+        b.lastModified.getTime() - a.lastModified.getTime()
+      );
     } catch {
       return [];
     }
   }
 
-  async getMemoryFile(date: string): Promise<MemoryFile | null> {
-    try {
-      const filename = `${date}.md`;
-      const filePath = path.join(MEMORY_DIR, filename);
-      const stats = await statAsync(filePath);
-      const content = await readFileAsync(filePath, 'utf-8');
-      
-      return { date, filename, content, lastModified: stats.mtime };
-    } catch {
-      return null;
-    }
-  }
-
-  async getLongTermMemory(): Promise<string | null> {
-    try {
-      const filePath = path.join(WORKSPACE_ROOT, 'MEMORY.md');
-      return await readFileAsync(filePath, 'utf-8');
-    } catch {
-      return null;
-    }
-  }
-
-  async getDocuments(): Promise<Document[]> {
+  private async scanDocuments(): Promise<Document[]> {
     const documents: Document[] = [];
-    await this.scanDirectory(WORKSPACE_ROOT, documents);
-    return this.sortDocumentsByDate(documents);
+    
+    try {
+      await this.scanDirectory(WORKSPACE_ROOT, documents, '');
+    } catch {
+      // Return empty array if scan fails
+    }
+
+    return documents.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 
-  private generateId(): string {
-    return Math.random().toString(36).substring(2, 11);
+  private async scanDirectory(dir: string, documents: Document[], relativePath: string): Promise<void> {
+    try {
+      const entries = await readdirAsync(dir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          if (!EXCLUDED_FILES.includes(entry.name) && !entry.name.startsWith('.')) {
+            await this.scanDirectory(
+              path.join(dir, entry.name),
+              documents,
+              path.join(relativePath, entry.name)
+            );
+          }
+        } else if (entry.isFile()) {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (!EXCLUDED_EXTENSIONS.includes(ext) && !entry.name.startsWith('.')) {
+            try {
+              const stats = await statAsync(path.join(dir, entry.name));
+              documents.push({
+                path: path.join(relativePath, entry.name),
+                name: entry.name,
+                category: this.getCategory(relativePath),
+                createdAt: stats.birthtime,
+                size: stats.size,
+                extension: ext,
+              });
+            } catch {
+              // Skip files that can't be read
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore errors for directories that can't be read
+    }
   }
 
-  private getCurrentDateString(): string {
-    return new Date().toISOString().split('T')[0];
+  private getCategory(relativePath: string): string {
+    const parts = relativePath.split(path.sep);
+    if (parts.length === 0) return 'root';
+    
+    const firstDir = parts[0].toLowerCase();
+    const categoryMap: Record<string, string> = {
+      'docs': 'documentation',
+      'src': 'source',
+      'components': 'components',
+      'app': 'application',
+      'lib': 'library',
+      'skills': 'skills',
+      'memory': 'memory',
+    };
+
+    return categoryMap[firstDir] || firstDir || 'other';
   }
 
   private createMockCronJobs(): CronJob[] {
     return [
       {
         id: '1',
-        name: 'Morning Briefing',
-        schedule: '0 8 * * *',
-        lastRun: '2025-01-16T08:00:00Z',
-        nextRun: '2025-01-17T08:00:00Z',
+        name: 'Morning Brief',
+        schedule: '0 7 * * *',
         status: 'active',
-        command: 'generate-daily-brief',
+        command: 'node scripts/morning-brief.js',
+        lastRun: new Date(Date.now() - 3600000).toISOString(),
+        nextRun: new Date(Date.now() + 82800000).toISOString(),
       },
       {
         id: '2',
-        name: 'Email Check',
-        schedule: '*/30 * * * *',
-        lastRun: '2025-01-16T14:30:00Z',
-        nextRun: '2025-01-16T15:00:00Z',
+        name: 'Research Pipeline',
+        schedule: '0 */4 * * *',
         status: 'active',
-        command: 'check-emails',
+        command: 'node scripts/research.js',
+        lastRun: new Date(Date.now() - 7200000).toISOString(),
+        nextRun: new Date(Date.now() + 7200000).toISOString(),
+      },
+      {
+        id: '3',
+        name: 'Memory Cleanup',
+        schedule: '0 2 * * 0',
+        status: 'paused',
+        command: 'node scripts/cleanup.js',
       },
     ];
   }
@@ -131,109 +186,32 @@ export class FileSystemDataService implements DataService {
     return [
       {
         id: 'agent-1',
-        name: 'Code Reviewer',
+        name: 'Research Agent',
         status: 'active',
-        task: 'Reviewing PR #234',
-        runtime: 45 * 60 * 1000,
-        startTime: '2025-01-16T13:45:00Z',
-        progress: 65,
-        parentSession: 'main',
+        task: 'Analyzing competitor landscape for Moltera',
+        runtime: 2456,
+        startTime: new Date(Date.now() - 2456000).toISOString(),
+        progress: 67,
+        logs: ['Starting research...', 'Found 12 competitors', 'Analyzing features...'],
+      },
+      {
+        id: 'agent-2',
+        name: 'Code Review Agent',
+        status: 'completed',
+        task: 'Reviewing PR #42',
+        runtime: 189,
+        startTime: new Date(Date.now() - 189000).toISOString(),
+        logs: ['Starting code review...', 'Analyzed 15 files', 'No issues found'],
+      },
+      {
+        id: 'agent-3',
+        name: 'Documentation Agent',
+        status: 'idle',
+        task: 'Waiting for tasks',
+        runtime: 0,
+        startTime: new Date().toISOString(),
+        logs: [],
       },
     ];
-  }
-
-  private async parseMemoryFiles(files: string[]): Promise<MemoryFile[]> {
-    const memoryFiles: MemoryFile[] = [];
-    
-    for (const filename of files) {
-      if (!this.isMemoryFile(filename)) continue;
-      
-      const date = this.extractDateFromFilename(filename);
-      if (!date) continue;
-      
-      const filePath = path.join(MEMORY_DIR, filename);
-      const stats = await statAsync(filePath);
-      const content = await readFileAsync(filePath, 'utf-8');
-      
-      memoryFiles.push({ date, filename, content, lastModified: stats.mtime });
-    }
-    
-    return memoryFiles;
-  }
-
-  private isMemoryFile(filename: string): boolean {
-    return filename.endsWith('.md') && filename !== 'MEMORY.md';
-  }
-
-  private extractDateFromFilename(filename: string): string | null {
-    const match = filename.match(/(\d{4}-\d{2}-\d{2})\.md/);
-    return match ? match[1] : null;
-  }
-
-  private sortMemoryFilesByDate(files: MemoryFile[]): MemoryFile[] {
-    return [...files].sort((a, b) => b.date.localeCompare(a.date));
-  }
-
-  private async scanDirectory(dir: string, documents: Document[], relativePath: string = ''): Promise<void> {
-    const entries = await readdirAsync(dir, { withFileTypes: true });
-    
-    for (const entry of entries) {
-      if (this.shouldSkipEntry(entry.name)) continue;
-      
-      const fullPath = path.join(dir, entry.name);
-      const relPath = path.join(relativePath, entry.name);
-      
-      if (entry.isDirectory()) {
-        await this.scanDirectory(fullPath, documents, relPath);
-      } else {
-        await this.addDocument(fullPath, relPath, entry.name, documents);
-      }
-    }
-  }
-
-  private shouldSkipEntry(name: string): boolean {
-    return EXCLUDED_FILES.includes(name) || name.startsWith('.');
-  }
-
-  private async addDocument(fullPath: string, relPath: string, name: string, documents: Document[]): Promise<void> {
-    const ext = path.extname(name);
-    if (EXCLUDED_EXTENSIONS.includes(ext)) return;
-    
-    const stats = await statAsync(fullPath);
-    documents.push({
-      path: relPath,
-      name,
-      category: this.categorizeDocument(name, relPath),
-      createdAt: stats.birthtime,
-      size: stats.size,
-      extension: ext || 'no-ext',
-    });
-  }
-
-  private categorizeDocument(filename: string, filePath: string): string {
-    const lowerPath = filePath.toLowerCase();
-    const lowerName = filename.toLowerCase();
-    
-    if (lowerPath.includes('skill') || lowerName.includes('skill')) return 'Skills';
-    if (lowerPath.includes('analysis') || lowerName.includes('analysis')) return 'Analysis';
-    if (lowerPath.includes('business') || lowerName.includes('business')) return 'Business';
-    if (lowerPath.includes('project') || lowerName.includes('project')) return 'Projects';
-    if (lowerPath.includes('doc') || lowerName.endsWith('.md')) return 'Documentation';
-    if (this.isConfigFile(lowerName)) return 'Config';
-    if (this.isCodeFile(lowerName)) return 'Code';
-    
-    return 'Other';
-  }
-
-  private isConfigFile(filename: string): boolean {
-    return ['.json', '.yaml', '.yml'].some(ext => filename.endsWith(ext));
-  }
-
-  private isCodeFile(filename: string): boolean {
-    return ['.ts', '.tsx', '.js', '.jsx'].some(ext => filename.endsWith(ext));
-  }
-
-  private sortDocumentsByDate(documents: Document[]): Document[] {
-    return [...documents].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 }

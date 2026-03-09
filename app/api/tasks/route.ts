@@ -10,11 +10,9 @@ export async function GET(request: NextRequest) {
     const statusParam = searchParams.get('status');
     const assigneeParam = searchParams.get('assignee');
 
-    // Build filters only if params exist
     const filters: { status?: TaskStatus; assignee?: string } = {};
     
     if (statusParam) {
-      // Validate status is a valid TaskStatus
       const validStatuses: TaskStatus[] = ['backlog', 'in-progress', 'review', 'done'];
       if (validStatuses.includes(statusParam as TaskStatus)) {
         filters.status = statusParam as TaskStatus;
@@ -25,13 +23,8 @@ export async function GET(request: NextRequest) {
       filters.assignee = assigneeParam;
     }
 
-    // Get tasks with or without filters
-    let tasks;
-    if (filters.status !== undefined || filters.assignee !== undefined) {
-      tasks = taskDb.getAll(filters);
-    } else {
-      tasks = taskDb.getAll();
-    }
+    const hasFilters = filters.status !== undefined || filters.assignee !== undefined;
+    const tasks = hasFilters ? await taskDb.getAll(filters) : await taskDb.getAll();
 
     return NextResponse.json({ success: true, tasks });
   } catch (error) {
@@ -48,7 +41,6 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    // Validate required fields
     if (!body.title || typeof body.title !== 'string') {
       return NextResponse.json(
         { success: false, error: 'Title is required' },
@@ -56,7 +48,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create task input
     const input: CreateTaskInput = {
       title: body.title.trim(),
       description: body.description?.trim(),
@@ -64,28 +55,27 @@ export async function POST(request: NextRequest) {
       assignee: body.assignee || 'Lisa',
     };
 
-    // Create task in database
-    const task = taskDb.create(input);
+    const task = await taskDb.create(input);
 
-    // Send webhook asynchronously (don't block response)
+    // Send webhook asynchronously
     setImmediate(async () => {
       try {
         const payload = buildWebhookPayload(task);
         const result = await sendWebhook(payload);
 
         if (result.success) {
-          taskDb.markWebhookDelivered(task.id);
-          webhookLogDb.log(task.id, 'success');
+          await taskDb.markWebhookDelivered(task.id);
+          await webhookLogDb.log(task.id, 'success');
           console.log(`Webhook delivered for task ${task.id}`);
         } else {
-          taskDb.incrementWebhookAttempt(task.id, result.error);
-          webhookLogDb.log(task.id, 'failed', result.error);
+          await taskDb.incrementWebhookAttempt(task.id, result.error);
+          await webhookLogDb.log(task.id, 'failed', result.error);
           console.error(`Webhook failed for task ${task.id}: ${result.error}`);
         }
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        taskDb.incrementWebhookAttempt(task.id, errorMsg);
-        webhookLogDb.log(task.id, 'failed', errorMsg);
+        await taskDb.incrementWebhookAttempt(task.id, errorMsg);
+        await webhookLogDb.log(task.id, 'failed', errorMsg);
         console.error(`Webhook exception for task ${task.id}:`, error);
       }
     });
