@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { cn } from '@/lib/classUtils';
 import { formatDuration } from '@/lib/dateUtils';
 import {
@@ -14,7 +14,9 @@ import {
   MoreVertical,
   AlertTriangle,
   CheckCircle2,
-  PauseCircle
+  PauseCircle,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 
 interface AgentSession {
@@ -29,80 +31,102 @@ interface AgentSession {
   logs?: string[];
 }
 
-const initialAgents: AgentSession[] = [
-  {
-    id: 'agent-1',
-    name: 'Code Reviewer',
-    status: 'active',
-    task: 'Reviewing PR #234 - Authentication refactor',
-    runtime: 45 * 60 * 1000,
-    startTime: '2025-01-16T13:45:00Z',
-    progress: 65,
-    parentSession: 'main',
-    logs: ['Starting code review...', 'Analyzing auth.ts changes...', 'Found 3 potential issues']
-  },
-  {
-    id: 'agent-2',
-    name: 'Documentation Writer',
-    status: 'idle',
-    task: 'Waiting for task assignment',
-    runtime: 0,
-    startTime: '2025-01-16T10:00:00Z',
-    parentSession: 'main'
-  },
-  {
-    id: 'agent-3',
-    name: 'Bug Hunter',
-    status: 'active',
-    task: 'Investigating memory leak in dashboard component',
-    runtime: 120 * 60 * 1000,
-    startTime: '2025-01-16T12:30:00Z',
-    progress: 30,
-    parentSession: 'main',
-    logs: ['Analyzing heap dumps...', 'Found potential leak in useEffect cleanup']
-  },
-  {
-    id: 'agent-4',
-    name: 'Test Runner',
-    status: 'completed',
-    task: 'E2E test suite execution',
-    runtime: 15 * 60 * 1000,
-    startTime: '2025-01-16T14:00:00Z',
-    progress: 100
-  },
-  {
-    id: 'agent-5',
-    name: 'Security Scanner',
-    status: 'error',
-    task: 'Dependency vulnerability scan',
-    runtime: 5 * 60 * 1000,
-    startTime: '2025-01-16T14:30:00Z',
-    parentSession: 'main',
-    logs: ['Starting security scan...', 'ERROR: Failed to connect to vulnerability database']
-  }
-];
-
 export default function AgentsPage() {
-  const [agents, setAgents] = useState<AgentSession[]>(initialAgents);
+  const [agents, setAgents] = useState<AgentSession[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<AgentSession | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const killSession = (agentId: string) => {
-    setAgents(agents.map(agent => 
-      agent.id === agentId ? { ...agent, status: 'completed' as const } : agent
-    ));
+  useEffect(() => {
+    fetchAgents();
+  }, []);
+
+  const fetchAgents = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch('/api/agents');
+      const data = await res.json();
+      if (data.success) {
+        setAgents(data.agents);
+      } else {
+        setError(data.error || 'Failed to fetch agents');
+      }
+    } catch {
+      setError('Failed to connect to server');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const restartSession = (agentId: string) => {
-    setAgents(agents.map(agent => 
-      agent.id === agentId 
-        ? { ...agent, status: 'active' as const, runtime: 0, startTime: new Date().toISOString() } 
+  const killSession = async (agentId: string) => {
+    // Optimistic update
+    setAgents(agents.map(agent =>
+      agent.id === agentId ? { ...agent, status: 'completed' as const } : agent
+    ));
+
+    try {
+      const res = await fetch(`/api/agents/${agentId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'completed' }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        fetchAgents(); // Revert by refetching
+      }
+    } catch {
+      fetchAgents();
+    }
+  };
+
+  const restartSession = async (agentId: string) => {
+    // Optimistic update
+    setAgents(agents.map(agent =>
+      agent.id === agentId
+        ? { ...agent, status: 'active' as const, runtime: 0, startTime: new Date().toISOString() }
         : agent
     ));
+
+    try {
+      const res = await fetch(`/api/agents/${agentId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'active', runtime: 0 }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        fetchAgents();
+      }
+    } catch {
+      fetchAgents();
+    }
   };
 
   const activeAgents = agents.filter(a => a.status === 'active').length;
   const idleAgents = agents.filter(a => a.status === 'idle').length;
   const errorAgents = agents.filter(a => a.status === 'error').length;
+
+  if (loading) {
+    return (
+      <div className="p-8 h-full flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-linear-primary animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-8 h-full flex items-center justify-center">
+        <div className="text-center">
+          <AlertCircle className="w-8 h-8 text-linear-danger mx-auto mb-2" />
+          <p className="text-linear-textMuted">{error}</p>
+          <button onClick={fetchAgents} className="mt-4 px-4 py-2 bg-linear-primary text-white rounded-lg text-sm">
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 h-full">
@@ -123,7 +147,7 @@ export default function AgentsPage() {
       {/* Agent Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {agents.map(agent => (
-          <div 
+          <div
             key={agent.id}
             onClick={() => setSelectedAgent(agent)}
             className="glass rounded-xl p-5 cursor-pointer card-hover"
@@ -167,17 +191,17 @@ export default function AgentsPage() {
             <div className="flex items-center justify-between text-xs text-linear-textMuted">
               <div className="flex items-center gap-1">
                 <Clock className="w-3 h-3" />
-                {agent.status === 'active' 
-                  ? formatDuration(agent.runtime) 
-                  : agent.status === 'completed' 
-                    ? 'Completed' 
+                {agent.status === 'active'
+                  ? formatDuration(agent.runtime)
+                  : agent.status === 'completed'
+                    ? 'Completed'
                     : 'Idle'
                 }
               </div>
               {agent.progress !== undefined && (
                 <div className="flex items-center gap-2 flex-1 mx-4">
                   <div className="flex-1 h-1 bg-linear-bg rounded-full overflow-hidden">
-                    <div 
+                    <div
                       className={cn(
                         "h-full rounded-full transition-all",
                         agent.status === 'error' ? 'bg-linear-danger' : 'bg-linear-primary'
@@ -252,7 +276,7 @@ export default function AgentsPage() {
                     <span className="text-sm text-linear-textMuted">{selectedAgent.progress}%</span>
                   </div>
                   <div className="h-2 bg-linear-bg rounded-full overflow-hidden">
-                    <div 
+                    <div
                       className={cn(
                         "h-full rounded-full transition-all",
                         selectedAgent.status === 'error' ? 'bg-linear-danger' : 'bg-linear-primary'

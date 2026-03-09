@@ -36,13 +36,13 @@ export function getActiveTasksCount(tasks: Task[]): number {
 }
 
 export function updateTaskStatus(
-  tasks: Task[], 
-  taskId: string, 
+  tasks: Task[],
+  taskId: string,
   newStatus: TaskStatus
 ): Task[] {
-  return tasks.map(task => 
-    task.id === taskId 
-      ? { ...task, status: newStatus }
+  return tasks.map(task =>
+    task.id === taskId
+      ? { ...task, status: newStatus, updatedAt: getCurrentDateString() }
       : task
   );
 }
@@ -60,6 +60,7 @@ export function createTask(
     assignee: assignee.trim(),
     priority,
     createdAt: getCurrentDateString(),
+    updatedAt: getCurrentDateString(),
     description: options.description ?? null,
     dueDate: options.dueDate,
     completedAt: options.completedAt,

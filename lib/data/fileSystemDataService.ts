@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { Task, CronJob, AgentSession, MemoryFile, Document } from '../types';
 import { DataService, CreateTaskData } from './dataService';
-import { taskDb } from '../db';
+import { taskDb, cronJobDb, agentSessionDb } from '../db';
 
 const WORKSPACE_ROOT = '/Users/birgerlie/clawd';
 const MEMORY_DIR = path.join(WORKSPACE_ROOT, 'memory');
@@ -38,11 +38,41 @@ export class FileSystemDataService implements DataService {
   }
 
   async getCronJobs(): Promise<CronJob[]> {
-    return this.createMockCronJobs();
+    const rows = await cronJobDb.getAll();
+    const jobs: CronJob[] = [];
+    for (const row of rows) {
+      const history = await cronJobDb.getHistory(row.id);
+      jobs.push({
+        id: row.id,
+        name: row.name,
+        schedule: row.schedule,
+        command: row.command,
+        status: row.status,
+        lastRun: row.last_run || undefined,
+        nextRun: row.next_run || undefined,
+        history: history.map(h => ({
+          timestamp: h.timestamp,
+          status: h.status as 'success' | 'error',
+          output: h.output || undefined,
+        })),
+      });
+    }
+    return jobs;
   }
 
   async getAgentSessions(): Promise<AgentSession[]> {
-    return this.createMockAgentSessions();
+    const rows = await agentSessionDb.getAll();
+    return rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      status: row.status,
+      task: row.task,
+      runtime: row.runtime,
+      startTime: row.start_time,
+      progress: row.progress || undefined,
+      parentSession: row.parent_session || undefined,
+      logs: row.logs,
+    }));
   }
 
   async getMemoryFiles(): Promise<MemoryFile[]> {
@@ -152,78 +182,15 @@ export class FileSystemDataService implements DataService {
     return categoryMap[firstDir] || firstDir || 'other';
   }
 
-  private createMockCronJobs(): CronJob[] {
-    return [
-      {
-        id: '1',
-        name: 'Morning Brief',
-        schedule: '0 7 * * *',
-        status: 'active',
-        command: 'node scripts/morning-brief.js',
-        lastRun: new Date(Date.now() - 3600000).toISOString(),
-        nextRun: new Date(Date.now() + 82800000).toISOString(),
-      },
-      {
-        id: '2',
-        name: 'Research Pipeline',
-        schedule: '0 */4 * * *',
-        status: 'active',
-        command: 'node scripts/research.js',
-        lastRun: new Date(Date.now() - 7200000).toISOString(),
-        nextRun: new Date(Date.now() + 7200000).toISOString(),
-      },
-      {
-        id: '3',
-        name: 'Memory Cleanup',
-        schedule: '0 2 * * 0',
-        status: 'paused',
-        command: 'node scripts/cleanup.js',
-      },
-    ];
-  }
 
-  private createMockAgentSessions(): AgentSession[] {
-    return [
-      {
-        id: 'agent-1',
-        name: 'Research Agent',
-        status: 'active',
-        task: 'Analyzing competitor landscape for Moltera',
-        runtime: 2456,
-        startTime: new Date(Date.now() - 2456000).toISOString(),
-        progress: 67,
-        logs: ['Starting research...', 'Found 12 competitors', 'Analyzing features...'],
-      },
-      {
-        id: 'agent-2',
-        name: 'Code Review Agent',
-        status: 'completed',
-        task: 'Reviewing PR #42',
-        runtime: 189,
-        startTime: new Date(Date.now() - 189000).toISOString(),
-        logs: ['Starting code review...', 'Analyzed 15 files', 'No issues found'],
-      },
-      {
-        id: 'agent-3',
-        name: 'Documentation Agent',
-        status: 'idle',
-        task: 'Waiting for tasks',
-        runtime: 0,
-        startTime: new Date().toISOString(),
-        logs: [],
-      },
-    ];
-  }
-
-  // Missing interface methods
   async killAgentSession(sessionId: string): Promise<boolean> {
-    console.log(`Killing agent session: ${sessionId}`);
-    return true;
+    const updated = await agentSessionDb.update(sessionId, { status: 'completed' });
+    return updated !== null;
   }
 
   async restartAgentSession(sessionId: string): Promise<boolean> {
-    console.log(`Restarting agent session: ${sessionId}`);
-    return true;
+    const updated = await agentSessionDb.update(sessionId, { status: 'active', runtime: 0 });
+    return updated !== null;
   }
 
   async getMemoryFile(date: string): Promise<MemoryFile | null> {

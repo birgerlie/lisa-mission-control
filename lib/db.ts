@@ -1,9 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import { v4 as uuidv4 } from 'uuid';
-import { TaskStatus, Priority } from './types';
+import { TaskStatus, Priority, CronStatus, AgentStatus } from './types';
 
 // Re-export types
-export type { TaskStatus, Priority } from './types';
+export type { TaskStatus, Priority, CronStatus, AgentStatus } from './types';
 
 export interface Task {
   id: string;
@@ -260,6 +260,252 @@ export const webhookLogDb = {
       error: log.error,
       createdAt: log.created_at,
     }));
+  },
+};
+
+// Cron job types
+export interface CronJobRow {
+  id: string;
+  name: string;
+  schedule: string;
+  command: string;
+  status: CronStatus;
+  last_run: string | null;
+  next_run: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateCronJobInput {
+  name: string;
+  schedule: string;
+  command: string;
+  status?: CronStatus;
+  next_run?: string;
+}
+
+export interface UpdateCronJobInput {
+  name?: string;
+  schedule?: string;
+  command?: string;
+  status?: CronStatus;
+  last_run?: string;
+  next_run?: string;
+}
+
+// Agent session types
+export interface AgentSessionRow {
+  id: string;
+  name: string;
+  status: AgentStatus;
+  task: string;
+  runtime: number;
+  start_time: string;
+  progress: number | null;
+  parent_session: string | null;
+  logs: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateAgentSessionInput {
+  name: string;
+  task: string;
+  status?: AgentStatus;
+  parent_session?: string;
+}
+
+export interface UpdateAgentSessionInput {
+  status?: AgentStatus;
+  task?: string;
+  runtime?: number;
+  progress?: number;
+  logs?: string[];
+}
+
+// Cron job operations
+export const cronJobDb = {
+  async getAll(): Promise<CronJobRow[]> {
+    const { data, error } = await getDb()
+      .from('cron_jobs')
+      .select()
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getById(id: string): Promise<CronJobRow | null> {
+    const { data, error } = await getDb()
+      .from('cron_jobs')
+      .select()
+      .eq('id', id)
+      .single();
+
+    if (error || !data) return null;
+    return data;
+  },
+
+  async create(input: CreateCronJobInput): Promise<CronJobRow> {
+    const id = uuidv4();
+    const now = new Date().toISOString();
+
+    const { data, error } = await getDb()
+      .from('cron_jobs')
+      .insert({
+        id,
+        name: input.name,
+        schedule: input.schedule,
+        command: input.command,
+        status: input.status || 'active',
+        next_run: input.next_run || null,
+        created_at: now,
+        updated_at: now,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async update(id: string, input: UpdateCronJobInput): Promise<CronJobRow | null> {
+    const updates: any = { updated_at: new Date().toISOString() };
+
+    if (input.name !== undefined) updates.name = input.name;
+    if (input.schedule !== undefined) updates.schedule = input.schedule;
+    if (input.command !== undefined) updates.command = input.command;
+    if (input.status !== undefined) updates.status = input.status;
+    if (input.last_run !== undefined) updates.last_run = input.last_run;
+    if (input.next_run !== undefined) updates.next_run = input.next_run;
+
+    const { data, error } = await getDb()
+      .from('cron_jobs')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error || !data) return null;
+    return data;
+  },
+
+  async delete(id: string): Promise<boolean> {
+    const { error } = await getDb()
+      .from('cron_jobs')
+      .delete()
+      .eq('id', id);
+
+    return !error;
+  },
+
+  async getHistory(jobId: string): Promise<Array<{ id: number; timestamp: string; status: string; output: string | null }>> {
+    const { data, error } = await getDb()
+      .from('job_history')
+      .select()
+      .eq('job_id', jobId)
+      .order('timestamp', { ascending: false })
+      .limit(50);
+
+    if (error) return [];
+    return (data || []).map((row: any) => ({
+      id: row.id,
+      timestamp: row.timestamp,
+      status: row.status,
+      output: row.output,
+    }));
+  },
+
+  async addHistoryEntry(jobId: string, status: 'success' | 'error', output?: string): Promise<void> {
+    const { error } = await getDb()
+      .from('job_history')
+      .insert({
+        job_id: jobId,
+        status,
+        output: output || null,
+        timestamp: new Date().toISOString(),
+      });
+
+    if (error) console.error('Failed to add job history:', error);
+  },
+};
+
+// Agent session operations
+export const agentSessionDb = {
+  async getAll(): Promise<AgentSessionRow[]> {
+    const { data, error } = await getDb()
+      .from('agent_sessions')
+      .select()
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getById(id: string): Promise<AgentSessionRow | null> {
+    const { data, error } = await getDb()
+      .from('agent_sessions')
+      .select()
+      .eq('id', id)
+      .single();
+
+    if (error || !data) return null;
+    return data;
+  },
+
+  async create(input: CreateAgentSessionInput): Promise<AgentSessionRow> {
+    const id = uuidv4();
+    const now = new Date().toISOString();
+
+    const { data, error } = await getDb()
+      .from('agent_sessions')
+      .insert({
+        id,
+        name: input.name,
+        status: input.status || 'idle',
+        task: input.task,
+        runtime: 0,
+        start_time: now,
+        progress: 0,
+        parent_session: input.parent_session || null,
+        logs: [],
+        created_at: now,
+        updated_at: now,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async update(id: string, input: UpdateAgentSessionInput): Promise<AgentSessionRow | null> {
+    const updates: any = { updated_at: new Date().toISOString() };
+
+    if (input.status !== undefined) updates.status = input.status;
+    if (input.task !== undefined) updates.task = input.task;
+    if (input.runtime !== undefined) updates.runtime = input.runtime;
+    if (input.progress !== undefined) updates.progress = input.progress;
+    if (input.logs !== undefined) updates.logs = input.logs;
+
+    const { data, error } = await getDb()
+      .from('agent_sessions')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error || !data) return null;
+    return data;
+  },
+
+  async delete(id: string): Promise<boolean> {
+    const { error } = await getDb()
+      .from('agent_sessions')
+      .delete()
+      .eq('id', id);
+
+    return !error;
   },
 };
 

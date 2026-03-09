@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { cn } from '@/lib/classUtils';
 import { formatRelativeTime, formatDate } from '@/lib/dateUtils';
 import {
@@ -12,7 +12,8 @@ import {
   ChevronRight,
   CheckCircle2,
   AlertCircle,
-  History
+  History,
+  Loader2
 } from 'lucide-react';
 
 interface CronJob {
@@ -26,89 +27,97 @@ interface CronJob {
   history?: { timestamp: string; status: 'success' | 'error'; output?: string }[];
 }
 
-const initialJobs: CronJob[] = [
-  {
-    id: '1',
-    name: 'Morning Briefing',
-    schedule: '0 8 * * *',
-    lastRun: '2025-01-16T08:00:00Z',
-    nextRun: '2025-01-17T08:00:00Z',
-    status: 'active',
-    command: 'generate-daily-brief',
-    history: [
-      { timestamp: '2025-01-16T08:00:00Z', status: 'success' },
-      { timestamp: '2025-01-15T08:00:00Z', status: 'success' },
-      { timestamp: '2025-01-14T08:00:00Z', status: 'error', output: 'API timeout' }
-    ]
-  },
-  {
-    id: '2',
-    name: 'Email Check',
-    schedule: '*/30 * * * *',
-    lastRun: '2025-01-16T14:30:00Z',
-    nextRun: '2025-01-16T15:00:00Z',
-    status: 'active',
-    command: 'check-emails',
-    history: [
-      { timestamp: '2025-01-16T14:30:00Z', status: 'success' },
-      { timestamp: '2025-01-16T14:00:00Z', status: 'success' }
-    ]
-  },
-  {
-    id: '3',
-    name: 'Weekly Report',
-    schedule: '0 9 * * 1',
-    nextRun: '2025-01-20T09:00:00Z',
-    status: 'paused',
-    command: 'generate-weekly-report'
-  },
-  {
-    id: '4',
-    name: 'Memory Cleanup',
-    schedule: '0 2 * * 0',
-    lastRun: '2025-01-12T02:00:00Z',
-    nextRun: '2025-01-19T02:00:00Z',
-    status: 'active',
-    command: 'cleanup-old-memories'
-  },
-  {
-    id: '5',
-    name: 'System Health Check',
-    schedule: '0 */6 * * *',
-    lastRun: '2025-01-16T12:00:00Z',
-    nextRun: '2025-01-16T18:00:00Z',
-    status: 'error',
-    command: 'health-check',
-    history: [
-      { timestamp: '2025-01-16T12:00:00Z', status: 'error', output: 'Disk space warning' },
-      { timestamp: '2025-01-16T06:00:00Z', status: 'success' }
-    ]
-  }
-];
-
 export default function CalendarPage() {
-  const [jobs, setJobs] = useState<CronJob[]>(initialJobs);
+  const [jobs, setJobs] = useState<CronJob[]>([]);
   const [selectedJob, setSelectedJob] = useState<CronJob | null>(null);
   const [view, setView] = useState<'list' | 'calendar'>('list');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const toggleJobStatus = (jobId: string) => {
-    setJobs(jobs.map(job => {
-      if (job.id === jobId) {
-        return {
-          ...job,
-          status: job.status === 'active' ? 'paused' : 'active'
-        };
+  useEffect(() => {
+    fetchJobs();
+  }, []);
+
+  const fetchJobs = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch('/api/cron-jobs');
+      const data = await res.json();
+      if (data.success) {
+        setJobs(data.jobs);
+      } else {
+        setError(data.error || 'Failed to fetch jobs');
       }
-      return job;
-    }));
+    } catch {
+      setError('Failed to connect to server');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const runJobNow = (jobId: string) => {
-    console.log(`Running job ${jobId}`);
+  const toggleJobStatus = async (jobId: string) => {
+    const job = jobs.find(j => j.id === jobId);
+    if (!job) return;
+
+    const newStatus = job.status === 'active' ? 'paused' : 'active';
+
+    // Optimistic update
+    setJobs(jobs.map(j => j.id === jobId ? { ...j, status: newStatus } : j));
+
+    try {
+      const res = await fetch(`/api/cron-jobs/${jobId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        // Revert on failure
+        setJobs(jobs.map(j => j.id === jobId ? { ...j, status: job.status } : j));
+      }
+    } catch {
+      setJobs(jobs.map(j => j.id === jobId ? { ...j, status: job.status } : j));
+    }
+  };
+
+  const runJobNow = async (jobId: string) => {
+    // For now, just update last_run timestamp
+    try {
+      await fetch(`/api/cron-jobs/${jobId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lastRun: new Date().toISOString() }),
+      });
+      fetchJobs();
+    } catch {
+      console.error('Failed to run job');
+    }
   };
 
   const activeJobs = jobs.filter(j => j.status === 'active').length;
   const totalJobs = jobs.length;
+
+  if (loading) {
+    return (
+      <div className="p-8 h-full flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-linear-primary animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-8 h-full flex items-center justify-center">
+        <div className="text-center">
+          <AlertCircle className="w-8 h-8 text-linear-danger mx-auto mb-2" />
+          <p className="text-linear-textMuted">{error}</p>
+          <button onClick={fetchJobs} className="mt-4 px-4 py-2 bg-linear-primary text-white rounded-lg text-sm">
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 h-full">
@@ -125,8 +134,8 @@ export default function CalendarPage() {
             onClick={() => setView('list')}
             className={cn(
               "px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-              view === 'list' 
-                ? 'bg-linear-primary text-white' 
+              view === 'list'
+                ? 'bg-linear-primary text-white'
                 : 'text-linear-textMuted hover:text-linear-text hover:bg-linear-surfaceHover'
             )}
           >
@@ -136,8 +145,8 @@ export default function CalendarPage() {
             onClick={() => setView('calendar')}
             className={cn(
               "px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-              view === 'calendar' 
-                ? 'bg-linear-primary text-white' 
+              view === 'calendar'
+                ? 'bg-linear-primary text-white'
                 : 'text-linear-textMuted hover:text-linear-text hover:bg-linear-surfaceHover'
             )}
           >
@@ -161,8 +170,8 @@ export default function CalendarPage() {
             </thead>
             <tbody>
               {jobs.map(job => (
-                <tr 
-                  key={job.id} 
+                <tr
+                  key={job.id}
                   className="border-b border-linear-border hover:bg-linear-surfaceHover transition-colors cursor-pointer"
                   onClick={() => setSelectedJob(job)}
                 >
@@ -360,19 +369,19 @@ function CalendarView({ jobs }: { jobs: CronJob[] }) {
             {day}
           </div>
         ))}
-        
+
         {Array.from({ length: firstDayOfMonth }, (_, i) => (
           <div key={`empty-${i}`} className="aspect-square" />
         ))}
-        
+
         {Array.from({ length: daysInMonth }, (_, i) => {
           const day = i + 1;
           const dayJobs = getJobsForDay(day);
           const isToday = today.getDate() === day && today.getMonth() === currentMonth && today.getFullYear() === currentYear;
-          
+
           return (
-            <div 
-              key={day} 
+            <div
+              key={day}
               className={cn(
                 "aspect-square p-2 border border-linear-border rounded-lg flex flex-col gap-1",
                 isToday && "bg-linear-primary/10 border-linear-primary"
@@ -385,8 +394,8 @@ function CalendarView({ jobs }: { jobs: CronJob[] }) {
                 {day}
               </span>
               {dayJobs.map(job => (
-                <div 
-                  key={job.id} 
+                <div
+                  key={job.id}
                   className={cn(
                     "text-[10px] px-1.5 py-0.5 rounded truncate",
                     job.status === 'active' ? 'bg-linear-success/20 text-linear-success' :

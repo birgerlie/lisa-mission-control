@@ -14,6 +14,7 @@ export interface Task {
   priority: Priority;
   dueDate?: string;
   createdAt: string;
+  updatedAt: string;
   completedAt?: string;
   tags?: string[];
   webhookAttempts: number;
