@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { webhookLogDb } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/webhook/logs
  * Get recent webhook delivery logs

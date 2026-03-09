@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { checkDatabaseHealth } from '@/lib/db';
 import { webhookConfig } from '@/lib/webhook';
 
+// Force dynamic to avoid static generation issues
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/health
  * Health check endpoint for monitoring

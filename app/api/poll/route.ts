@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { taskDb, webhookLogDb } from '@/lib/db';
 import { sendWebhook, buildWebhookPayload } from '@/lib/webhook';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * POST /api/poll
  * Polling endpoint for tasks that failed webhook delivery

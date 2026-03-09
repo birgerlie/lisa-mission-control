@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { taskDb, UpdateTaskInput } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 // PATCH /api/tasks/:id - Update a task
 export async function PATCH(
   request: NextRequest,

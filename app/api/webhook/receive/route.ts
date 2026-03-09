@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyWebhookAuth, checkRateLimit } from '@/lib/webhook';
 import { taskDb, webhookLogDb } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * POST /api/webhook/receive
  * Receives webhooks from Lisa (clawdbot)

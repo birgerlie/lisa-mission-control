@@ -3,6 +3,8 @@ import { taskDb, CreateTaskInput } from '@/lib/db';
 import { sendWebhook, buildWebhookPayload, webhookLogDb } from '@/lib/webhook';
 import { TaskStatus } from '@/lib/types';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/tasks - List all tasks
 export async function GET(request: NextRequest) {
   try {
