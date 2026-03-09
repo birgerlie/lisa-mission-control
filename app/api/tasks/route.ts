@@ -9,11 +9,12 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status') as CreateTaskInput['status'] | null;
     const assignee = searchParams.get('assignee');
 
-    const filters: { status?: typeof status; assignee?: string } = {};
+    const filters: { status?: string; assignee?: string } = {};
     if (status) filters.status = status;
     if (assignee) filters.assignee = assignee;
 
-    const tasks = taskDb.getAll(Object.keys(filters).length > 0 ? filters : undefined);
+    const hasFilters = Object.keys(filters).length > 0;
+    const tasks = taskDb.getAll(hasFilters ? filters : undefined);
 
     return NextResponse.json({ success: true, tasks });
   } catch (error) {
