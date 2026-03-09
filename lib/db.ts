@@ -48,9 +48,9 @@ function getPool(): Pool {
   
   pool = new Pool({
     connectionString,
-    ssl: {
-      rejectUnauthorized: false // Required for Supabase
-    }
+    ssl: process.env.NODE_ENV === 'production' ? {
+      rejectUnauthorized: false
+    } : false
   });
   
   return pool;
@@ -389,9 +389,11 @@ function mapRowToTask(row: any): Task {
   };
 }
 
-// Initialize on module load
-if (typeof window === 'undefined') {
-  initializeDatabase().catch(console.error);
+// Initialize on module load (skip during build)
+if (typeof window === 'undefined' && process.env.NEXT_PHASE !== 'phase-production-build') {
+  initializeDatabase().catch(err => {
+    console.error('Database initialization failed:', err.message);
+  });
 }
 
 export { getPool as db };
