@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Task } from '@/lib/types';
+import { Task, TaskStatus } from '@/lib/types';
 
-export type TaskStatus = 'pending' | 'in-progress' | 'review' | 'done';
+// Re-export types for convenience
+export type { Task, TaskStatus, Priority } from '@/lib/types';
 
 interface UseTasksReturn {
   tasks: Task[];
@@ -15,7 +16,7 @@ interface UseTasksReturn {
   refreshTasks: () => Promise<void>;
 }
 
-interface CreateTaskInput {
+export interface CreateTaskInput {
   title: string;
   description?: string;
   priority?: 'high' | 'medium' | 'low';

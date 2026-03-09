@@ -16,6 +16,9 @@ export interface Task {
   createdAt: string;
   completedAt?: string;
   tags?: string[];
+  webhookAttempts?: number;
+  lastWebhookError?: string;
+  webhookDeliveredAt?: string;
 }
 
 export interface CronJob {

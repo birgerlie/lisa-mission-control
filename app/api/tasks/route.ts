@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { taskDb, CreateTaskInput, UpdateTaskInput } from '@/lib/db';
+import { taskDb, CreateTaskInput } from '@/lib/db';
 import { sendWebhook, buildWebhookPayload, webhookLogDb } from '@/lib/webhook';
 import { TaskStatus } from '@/lib/types';
 
@@ -7,17 +7,31 @@ import { TaskStatus } from '@/lib/types';
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status') as CreateTaskInput['status'] | null;
-    const assignee = searchParams.get('assignee');
+    const statusParam = searchParams.get('status');
+    const assigneeParam = searchParams.get('assignee');
 
+    // Build filters only if params exist
     const filters: { status?: TaskStatus; assignee?: string } = {};
-    if (status && ['backlog', 'in-progress', 'review', 'done'].includes(status)) {
-      filters.status = status as TaskStatus;
+    
+    if (statusParam) {
+      // Validate status is a valid TaskStatus
+      const validStatuses: TaskStatus[] = ['backlog', 'in-progress', 'review', 'done'];
+      if (validStatuses.includes(statusParam as TaskStatus)) {
+        filters.status = statusParam as TaskStatus;
+      }
     }
-    if (assignee) filters.assignee = assignee;
+    
+    if (assigneeParam) {
+      filters.assignee = assigneeParam;
+    }
 
-    const hasFilters = Object.keys(filters).length > 0;
-    const tasks = taskDb.getAll(hasFilters ? filters : undefined);
+    // Get tasks with or without filters
+    let tasks;
+    if (filters.status !== undefined || filters.assignee !== undefined) {
+      tasks = taskDb.getAll(filters);
+    } else {
+      tasks = taskDb.getAll();
+    }
 
     return NextResponse.json({ success: true, tasks });
   } catch (error) {
@@ -54,7 +68,6 @@ export async function POST(request: NextRequest) {
     const task = taskDb.create(input);
 
     // Send webhook asynchronously (don't block response)
-    // The webhook failure will be handled by polling
     setImmediate(async () => {
       try {
         const payload = buildWebhookPayload(task);

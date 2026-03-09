@@ -15,10 +15,11 @@ function getWebhookState(task: Task): WebhookState {
   if (task.webhookDeliveredAt) {
     return 'delivered';
   }
-  if (task.webhookAttempts === 0) {
+  const attempts = task.webhookAttempts ?? 0;
+  if (attempts === 0) {
     return 'waiting';
   }
-  if (task.webhookAttempts >= 3) {
+  if (attempts >= 3) {
     return 'failed';
   }
   return 'pending';
@@ -85,7 +86,7 @@ export function WebhookStatusIndicator({ task, showDetails = false }: WebhookSta
       >
         <Icon className={`w-3.5 h-3.5 ${state === 'pending' ? 'animate-spin' : ''}`} />
         <span>{config.label}</span>
-        {task.webhookAttempts > 0 && state !== 'delivered' && (
+        {(task.webhookAttempts ?? 0) > 0 && state !== 'delivered' && (
           <span className="ml-0.5 opacity-60">({task.webhookAttempts})</span>
         )}
       </button>

@@ -1,9 +1,9 @@
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
+import { TaskStatus, Priority } from './types';
 
-// Database types
-export type TaskStatus = 'pending' | 'in-progress' | 'review' | 'done';
-export type Priority = 'high' | 'medium' | 'low';
+// Re-export types for backward compatibility
+export type { TaskStatus, Priority } from './types';
 
 export interface Task {
   id: string;
@@ -35,15 +35,28 @@ export interface UpdateTaskInput {
   assignee?: string;
 }
 
-// Initialize database
-const dbPath = process.env.DATABASE_PATH || './data/mission-control.db';
-const db = new Database(dbPath);
+// Lazy database initialization for Vercel compatibility
+let dbInstance: Database.Database | null = null;
 
-// Enable WAL mode for better performance
-db.pragma('journal_mode = WAL');
+function getDb(): Database.Database {
+  if (dbInstance) return dbInstance;
+  
+  // Skip database initialization during build/static generation
+  if (process.env.NEXT_PHASE === 'phase-production-build' || 
+      process.env.VERCEL_ENV === 'production' && !process.env.DATABASE_PATH) {
+    // Return a mock for build time
+    throw new Error('Database not available during build');
+  }
+  
+  const dbPath = process.env.DATABASE_PATH || './data/mission-control.db';
+  dbInstance = new Database(dbPath);
+  dbInstance.pragma('journal_mode = WAL');
+  initializeSchema(dbInstance);
+  
+  return dbInstance;
+}
 
-// Initialize schema
-export function initializeDatabase(): void {
+function initializeSchema(db: Database.Database): void {
   // Tasks table
   db.exec(`
     CREATE TABLE IF NOT EXISTS tasks (
@@ -82,13 +95,20 @@ export function initializeDatabase(): void {
   `);
 }
 
-// Initialize on module load
-initializeDatabase();
+// Initialize on module load (only in development)
+if (process.env.NODE_ENV === 'development') {
+  try {
+    getDb();
+  } catch {
+    // Ignore during build
+  }
+}
 
 // Task operations
 export const taskDb = {
   // Create a new task
   create(input: CreateTaskInput): Task {
+    const db = getDb();
     const id = uuidv4();
     const now = new Date().toISOString();
     
@@ -113,6 +133,7 @@ export const taskDb = {
 
   // Get task by ID
   getById(id: string): Task | null {
+    const db = getDb();
     const stmt = db.prepare('SELECT * FROM tasks WHERE id = ?');
     const row = stmt.get(id) as Task | undefined;
     return row || null;
@@ -120,6 +141,7 @@ export const taskDb = {
 
   // Get all tasks with optional filtering
   getAll(filters?: { status?: TaskStatus; assignee?: string }): Task[] {
+    const db = getDb();
     let query = 'SELECT * FROM tasks WHERE 1=1';
     const params: (string | number)[] = [];
 
@@ -144,6 +166,7 @@ export const taskDb = {
     const existing = this.getById(id);
     if (!existing) return null;
 
+    const db = getDb();
     const updates: string[] = [];
     const values: (string | number | null)[] = [];
 
@@ -182,6 +205,7 @@ export const taskDb = {
 
   // Delete task
   delete(id: string): boolean {
+    const db = getDb();
     const stmt = db.prepare('DELETE FROM tasks WHERE id = ?');
     const result = stmt.run(id);
     return result.changes > 0;
@@ -189,6 +213,7 @@ export const taskDb = {
 
   // Get tasks that need polling (webhook failed, pending for >2 minutes)
   getTasksNeedingPolling(minutesOld: number = 2): Task[] {
+    const db = getDb();
     const cutoffTime = new Date(Date.now() - minutesOld * 60 * 1000).toISOString();
     
     const stmt = db.prepare(`
@@ -205,6 +230,7 @@ export const taskDb = {
 
   // Increment webhook attempt counter
   incrementWebhookAttempt(id: string, error?: string): void {
+    const db = getDb();
     const stmt = db.prepare(`
       UPDATE tasks 
       SET webhookAttempts = webhookAttempts + 1,
@@ -217,6 +243,7 @@ export const taskDb = {
 
   // Mark webhook as delivered
   markWebhookDelivered(id: string): void {
+    const db = getDb();
     const stmt = db.prepare(`
       UPDATE tasks 
       SET webhookDeliveredAt = ?,
@@ -232,6 +259,7 @@ export const taskDb = {
 export const webhookLogDb = {
   // Log a webhook attempt
   log(taskId: string, status: 'success' | 'failed', error?: string): void {
+    const db = getDb();
     const stmt = db.prepare(`
       INSERT INTO webhook_logs (taskId, status, error, createdAt)
       VALUES (?, ?, ?, ?)
@@ -248,6 +276,7 @@ export const webhookLogDb = {
     error: string | null;
     createdAt: string;
   }> {
+    const db = getDb();
     const stmt = db.prepare(`
       SELECT * FROM webhook_logs 
       WHERE taskId = ? 
@@ -271,6 +300,7 @@ export const webhookLogDb = {
     error: string | null;
     createdAt: string;
   }> {
+    const db = getDb();
     const stmt = db.prepare(`
       SELECT * FROM webhook_logs 
       ORDER BY createdAt DESC
@@ -290,6 +320,7 @@ export const webhookLogDb = {
 // Health check
 export function checkDatabaseHealth(): { healthy: boolean; message: string } {
   try {
+    const db = getDb();
     db.prepare('SELECT 1').get();
     return { healthy: true, message: 'Database connection is healthy' };
   } catch (error) {
@@ -300,5 +331,5 @@ export function checkDatabaseHealth(): { healthy: boolean; message: string } {
   }
 }
 
-export { db };
-export default db;
+export { getDb as db };
+export default getDb;

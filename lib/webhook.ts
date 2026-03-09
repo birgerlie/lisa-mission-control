@@ -185,8 +185,8 @@ export const webhookConfig = {
 
 // Mock webhook log database for build compatibility
 export const webhookLogDb = {
-  log: (taskId: string, status: string, message: string) => {
-    console.log(`[WebhookLog] ${taskId} - ${status}: ${message}`);
+  log: (taskId: string, status: string, message?: string) => {
+    console.log(`[WebhookLog] ${taskId} - ${status}${message ? ': ' + message : ''}`);
   },
   getLogs: (taskId: string) => {
     return [];

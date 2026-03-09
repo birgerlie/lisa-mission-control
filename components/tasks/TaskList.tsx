@@ -13,7 +13,7 @@ interface TaskListProps {
 }
 
 const statusColors: Record<TaskStatus, string> = {
-  pending: 'status-pending',
+  backlog: 'status-pending',
   'in-progress': 'status-in-progress',
   review: 'status-review',
   done: 'status-done',
@@ -26,7 +26,7 @@ const priorityColors: Record<string, string> = {
 };
 
 const columns: { id: TaskStatus; title: string }[] = [
-  { id: 'pending', title: 'Pending' },
+  { id: 'backlog', title: 'Backlog' },
   { id: 'in-progress', title: 'In Progress' },
   { id: 'review', title: 'Review' },
   { id: 'done', title: 'Done' },
@@ -256,7 +256,7 @@ export function TaskListView({ tasks, onUpdateStatus, onDelete }: TaskListViewPr
             onChange={(e) => onUpdateStatus(task.id, e.target.value as TaskStatus)}
             className="text-xs bg-linear-bg border border-linear-border rounded px-2 py-1 text-linear-text"
           >
-            <option value="pending">Pending</option>
+            <option value="backlog">Backlog</option>
             <option value="in-progress">In Progress</option>
             <option value="review">Review</option>
             <option value="done">Done</option>
