@@ -13,6 +13,10 @@ import {
   Users,
   FolderKanban,
   Search,
+  MessageSquare,
+  Terminal,
+  DollarSign,
+  Activity,
   Command,
 } from 'lucide-react';
 
@@ -25,6 +29,10 @@ const navigationItems = [
   { name: 'Memory', href: '/memory', icon: Brain },
   { name: 'Documents', href: '/docs', icon: FileText },
   { name: 'Search', href: '/search', icon: Search },
+  { name: 'Chat', href: '/chat', icon: MessageSquare },
+  { name: 'Terminal', href: '/terminal', icon: Terminal },
+  { name: 'Costs', href: '/costs', icon: DollarSign },
+  { name: 'System', href: '/system', icon: Activity },
   { name: 'Team', href: '/team', icon: Users },
 ];
 
