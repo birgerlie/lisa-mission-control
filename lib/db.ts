@@ -509,6 +509,136 @@ export const agentSessionDb = {
   },
 };
 
+// Project types
+export interface ProjectRow {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  progress: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateProjectInput {
+  name: string;
+  description?: string;
+  status?: string;
+}
+
+export interface UpdateProjectInput {
+  name?: string;
+  description?: string;
+  status?: string;
+  progress?: number;
+}
+
+// Project operations
+export const projectDb = {
+  async getAll(): Promise<(ProjectRow & { task_count: number })[]> {
+    const { data, error } = await getDb()
+      .from('projects')
+      .select('*, project_tasks(task_id)')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return (data || []).map((row: any) => ({
+      ...row,
+      task_count: row.project_tasks?.length || 0,
+      project_tasks: undefined,
+    }));
+  },
+
+  async getById(id: string): Promise<ProjectRow | null> {
+    const { data, error } = await getDb()
+      .from('projects')
+      .select()
+      .eq('id', id)
+      .single();
+
+    if (error || !data) return null;
+    return data;
+  },
+
+  async create(input: CreateProjectInput): Promise<ProjectRow> {
+    const id = uuidv4();
+    const now = new Date().toISOString();
+
+    const { data, error } = await getDb()
+      .from('projects')
+      .insert({
+        id,
+        name: input.name,
+        description: input.description || null,
+        status: input.status || 'active',
+        progress: 0,
+        created_at: now,
+        updated_at: now,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async update(id: string, input: UpdateProjectInput): Promise<ProjectRow | null> {
+    const updates: any = { updated_at: new Date().toISOString() };
+
+    if (input.name !== undefined) updates.name = input.name;
+    if (input.description !== undefined) updates.description = input.description;
+    if (input.status !== undefined) updates.status = input.status;
+    if (input.progress !== undefined) updates.progress = input.progress;
+
+    const { data, error } = await getDb()
+      .from('projects')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error || !data) return null;
+    return data;
+  },
+
+  async delete(id: string): Promise<boolean> {
+    const { error } = await getDb()
+      .from('projects')
+      .delete()
+      .eq('id', id);
+
+    return !error;
+  },
+
+  async getLinkedTasks(projectId: string): Promise<string[]> {
+    const { data, error } = await getDb()
+      .from('project_tasks')
+      .select('task_id')
+      .eq('project_id', projectId);
+
+    if (error) return [];
+    return (data || []).map((r: any) => r.task_id);
+  },
+
+  async linkTask(projectId: string, taskId: string): Promise<boolean> {
+    const { error } = await getDb()
+      .from('project_tasks')
+      .insert({ project_id: projectId, task_id: taskId });
+
+    return !error;
+  },
+
+  async unlinkTask(projectId: string, taskId: string): Promise<boolean> {
+    const { error } = await getDb()
+      .from('project_tasks')
+      .delete()
+      .eq('project_id', projectId)
+      .eq('task_id', taskId);
+
+    return !error;
+  },
+};
+
 // Health check
 export async function checkDatabaseHealth(): Promise<{ healthy: boolean; message: string }> {
   try {

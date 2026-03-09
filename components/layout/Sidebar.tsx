@@ -11,16 +11,20 @@ import {
   Brain,
   FileText,
   Users,
+  FolderKanban,
+  Search,
   Command,
 } from 'lucide-react';
 
 const navigationItems = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Tasks', href: '/tasks', icon: Kanban },
+  { name: 'Projects', href: '/projects', icon: FolderKanban },
   { name: 'Calendar', href: '/calendar', icon: Calendar },
   { name: 'Agents', href: '/agents', icon: Bot },
   { name: 'Memory', href: '/memory', icon: Brain },
   { name: 'Documents', href: '/docs', icon: FileText },
+  { name: 'Search', href: '/search', icon: Search },
   { name: 'Team', href: '/team', icon: Users },
 ];
 

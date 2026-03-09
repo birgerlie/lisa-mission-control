@@ -67,6 +67,27 @@ export interface Document {
   extension: string;
 }
 
+export type ProjectStatus = 'active' | 'on-hold' | 'completed' | 'archived';
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  status: ProjectStatus;
+  progress: number;
+  createdAt: string;
+  updatedAt: string;
+  taskCount?: number;
+}
+
+export interface ActivityItem {
+  id: string;
+  type: 'task_created' | 'task_updated' | 'webhook_sent' | 'webhook_failed';
+  message: string;
+  timestamp: string;
+  taskId?: string;
+}
+
 export interface TeamMember {
   name: string;
   role: string;

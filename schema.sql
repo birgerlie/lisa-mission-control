@@ -144,6 +144,43 @@ CREATE POLICY "Allow all access for service role" ON job_history
 CREATE POLICY "Allow all access for service role" ON agent_sessions
   FOR ALL USING (true) WITH CHECK (true);
 
+-- Projects table
+CREATE TABLE IF NOT EXISTS projects (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'on-hold', 'completed', 'archived')),
+  progress INTEGER DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Project-task linking table
+CREATE TABLE IF NOT EXISTS project_tasks (
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
+  PRIMARY KEY (project_id, task_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+CREATE INDEX IF NOT EXISTS idx_project_tasks_project_id ON project_tasks(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_tasks_task_id ON project_tasks(task_id);
+
+DROP TRIGGER IF EXISTS update_projects_updated_at ON projects;
+CREATE TRIGGER update_projects_updated_at
+  BEFORE UPDATE ON projects
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_tasks ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow all access for service role" ON projects
+  FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY "Allow all access for service role" ON project_tasks
+  FOR ALL USING (true) WITH CHECK (true);
+
 -- Insert sample data
 INSERT INTO tasks (title, description, status, priority, assignee, created_at, updated_at)
 VALUES 
