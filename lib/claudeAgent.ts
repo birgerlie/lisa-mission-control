@@ -1,6 +1,6 @@
 import { spawn, ChildProcess } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
-import { getDb } from './db';
+import { db as getDb } from './db';
 
 // Active Claude Code processes
 const activeProcesses = new Map<string, ChildProcess>();
