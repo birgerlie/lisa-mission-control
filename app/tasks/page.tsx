@@ -4,6 +4,7 @@ import { useTasks, TaskStatus } from '@/hooks/useTasks';
 import { TaskCreationForm } from '@/components/tasks/TaskCreationForm';
 import { TaskList, TaskListView } from '@/components/tasks/TaskList';
 import { WebhookSummary } from '@/components/webhook/WebhookStatusIndicator';
+import { TaskStatus } from '@/hooks/useTasks';
 import { Loader2, LayoutGrid, List, RefreshCw, AlertCircle } from 'lucide-react';
 import { useState } from 'react';
 

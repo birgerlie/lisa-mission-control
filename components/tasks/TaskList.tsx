@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Task, TaskStatus } from '@/hooks/useTasks';
-import { WebhookStatusDot } from './WebhookStatusIndicator';
+import { WebhookStatusDot } from '@/components/webhook/WebhookStatusIndicator';
 import { MoreHorizontal, Calendar, User, GripVertical, Trash2, Edit } from 'lucide-react';
 
 interface TaskListProps {
