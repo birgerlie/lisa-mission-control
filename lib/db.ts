@@ -56,21 +56,23 @@ export const taskDb = {
     const id = uuidv4();
     const now = new Date().toISOString();
     
+    const insertData = {
+      id,
+      title: input.title,
+      description: input.description || null,
+      status: input.status || 'backlog',
+      priority: input.priority || 'medium',
+      assignee: input.assignee || 'Lisa',
+      created_at: now,
+      updated_at: now,
+      webhook_attempts: 0,
+      last_webhook_error: null,
+      webhook_delivered_at: null,
+    };
+    
     const { data, error } = await getSupabase()
       .from('tasks')
-      .insert({
-        id,
-        title: input.title,
-        description: input.description || null,
-        status: input.status || 'backlog',
-        priority: input.priority || 'medium',
-        assignee: input.assignee || 'Lisa',
-        created_at: now,
-        updated_at: now,
-        webhook_attempts: 0,
-        last_webhook_error: null,
-        webhook_delivered_at: null,
-      })
+      .insert(insertData as any)
       .select()
       .single();
     
@@ -81,7 +83,7 @@ export const taskDb = {
   async getById(id: string): Promise<Task | null> {
     const { data, error } = await getSupabase()
       .from('tasks')
-      .select('*')
+      .select('*' as any)
       .eq('id', id)
       .single();
     
@@ -90,7 +92,7 @@ export const taskDb = {
   },
 
   async getAll(filters?: { status?: TaskStatus; assignee?: string }): Promise<Task[]> {
-    let query = getSupabase().from('tasks').select('*');
+    let query = getSupabase().from('tasks').select('*' as any);
     
     if (filters?.status) {
       query = query.eq('status', filters.status);
@@ -119,7 +121,7 @@ export const taskDb = {
     
     const { data, error } = await getSupabase()
       .from('tasks')
-      .update(updates)
+      .update(updates as any)
       .eq('id', id)
       .select()
       .single();
@@ -132,7 +134,7 @@ export const taskDb = {
     const { error } = await getSupabase()
       .from('tasks')
       .delete()
-      .eq('id', id);
+      .eq('id', id as any);
     
     return !error;
   },
@@ -142,7 +144,7 @@ export const taskDb = {
     
     const { data, error } = await getSupabase()
       .from('tasks')
-      .select('*')
+      .select('*' as any)
       .eq('status', 'backlog')
       .lt('created_at', cutoffTime)
       .gte('webhook_attempts', 1)
@@ -195,14 +197,16 @@ export const taskDb = {
 // Webhook log operations
 export const webhookLogDb = {
   async log(taskId: string, status: 'success' | 'failed', error?: string): Promise<void> {
+    const logData = {
+      task_id: taskId,
+      status,
+      error: error || null,
+      created_at: new Date().toISOString(),
+    };
+    
     const { error: dbError } = await getSupabase()
       .from('webhook_logs')
-      .insert({
-        task_id: taskId,
-        status,
-        error: error || null,
-        created_at: new Date().toISOString(),
-      });
+      .insert(logData as any);
     
     if (dbError) console.error('Failed to log webhook:', dbError);
   },
@@ -216,7 +220,7 @@ export const webhookLogDb = {
   }>> {
     const { data, error } = await getSupabase()
       .from('webhook_logs')
-      .select('*')
+      .select('*' as any)
       .eq('task_id', taskId)
       .order('created_at', { ascending: false });
     
@@ -239,7 +243,7 @@ export const webhookLogDb = {
   }>> {
     const { data, error } = await getSupabase()
       .from('webhook_logs')
-      .select('*')
+      .select('*' as any)
       .order('created_at', { ascending: false })
       .limit(limit);
     
@@ -257,7 +261,7 @@ export const webhookLogDb = {
 // Health check
 export async function checkDatabaseHealth(): Promise<{ healthy: boolean; message: string }> {
   try {
-    const { error } = await getSupabase().from('tasks').select('id').limit(1);
+    const { error } = await getSupabase().from('tasks').select('id' as any).limit(1);
     if (error) throw error;
     return { healthy: true, message: 'Supabase connection is healthy' };
   } catch (error) {
