@@ -50,6 +50,11 @@ function getSupabase() {
   return supabase;
 }
 
+// Cast to any to bypass TypeScript issues until tables are created
+function getDb() {
+  return getSupabase() as any;
+}
+
 // Task operations
 export const taskDb = {
   async create(input: CreateTaskInput): Promise<Task> {
@@ -70,9 +75,9 @@ export const taskDb = {
       webhook_delivered_at: null,
     };
     
-    const { data, error } = await getSupabase()
+    const { data, error } = await getDb()
       .from('tasks')
-      .insert(insertData as any)
+      .insert(insertData)
       .select()
       .single();
     
@@ -81,9 +86,9 @@ export const taskDb = {
   },
 
   async getById(id: string): Promise<Task | null> {
-    const { data, error } = await getSupabase()
+    const { data, error } = await getDb()
       .from('tasks')
-      .select('*' as any)
+      .select()
       .eq('id', id)
       .single();
     
@@ -92,7 +97,7 @@ export const taskDb = {
   },
 
   async getAll(filters?: { status?: TaskStatus; assignee?: string }): Promise<Task[]> {
-    let query = getSupabase().from('tasks').select('*' as any);
+    let query = getDb().from('tasks').select();
     
     if (filters?.status) {
       query = query.eq('status', filters.status);
@@ -119,9 +124,9 @@ export const taskDb = {
     if (input.priority !== undefined) updates.priority = input.priority;
     if (input.assignee !== undefined) updates.assignee = input.assignee;
     
-    const { data, error } = await getSupabase()
+    const { data, error } = await getDb()
       .from('tasks')
-      .update(updates as any)
+      .update(updates)
       .eq('id', id)
       .select()
       .single();
@@ -131,10 +136,10 @@ export const taskDb = {
   },
 
   async delete(id: string): Promise<boolean> {
-    const { error } = await getSupabase()
+    const { error } = await getDb()
       .from('tasks')
       .delete()
-      .eq('id', id as any);
+      .eq('id', id);
     
     return !error;
   },
@@ -142,9 +147,9 @@ export const taskDb = {
   async getTasksNeedingPolling(minutesOld: number = 2): Promise<Task[]> {
     const cutoffTime = new Date(Date.now() - minutesOld * 60 * 1000).toISOString();
     
-    const { data, error } = await getSupabase()
+    const { data, error } = await getDb()
       .from('tasks')
-      .select('*' as any)
+      .select()
       .eq('status', 'backlog')
       .lt('created_at', cutoffTime)
       .gte('webhook_attempts', 1)
@@ -155,24 +160,24 @@ export const taskDb = {
     return (data || []).map(mapRowToTask);
   },
 
-  async incrementWebhookAttempt(id: string, error?: string): Promise<void> {
-    const { error: dbError } = await getSupabase()
-      .rpc('increment_webhook_attempt', { task_id: id, error_msg: error || null });
+  async incrementWebhookAttempt(id: string, errorMsg?: string): Promise<void> {
+    const { error: dbError } = await getDb()
+      .rpc('increment_webhook_attempt', { task_id: id, error_msg: errorMsg || null });
     
     if (dbError) {
       // Fallback if RPC doesn't exist
-      const { data: task } = await getSupabase()
+      const { data: task } = await getDb()
         .from('tasks')
         .select('webhook_attempts')
         .eq('id', id)
         .single();
       
       if (task) {
-        await getSupabase()
+        await getDb()
           .from('tasks')
           .update({
             webhook_attempts: (task.webhook_attempts || 0) + 1,
-            last_webhook_error: error || null,
+            last_webhook_error: errorMsg || null,
             updated_at: new Date().toISOString(),
           })
           .eq('id', id);
@@ -181,7 +186,7 @@ export const taskDb = {
   },
 
   async markWebhookDelivered(id: string): Promise<void> {
-    const { error } = await getSupabase()
+    const { error } = await getDb()
       .from('tasks')
       .update({
         webhook_delivered_at: new Date().toISOString(),
@@ -204,9 +209,9 @@ export const webhookLogDb = {
       created_at: new Date().toISOString(),
     };
     
-    const { error: dbError } = await getSupabase()
+    const { error: dbError } = await getDb()
       .from('webhook_logs')
-      .insert(logData as any);
+      .insert(logData);
     
     if (dbError) console.error('Failed to log webhook:', dbError);
   },
@@ -218,14 +223,14 @@ export const webhookLogDb = {
     error: string | null;
     createdAt: string;
   }>> {
-    const { data, error } = await getSupabase()
+    const { data, error } = await getDb()
       .from('webhook_logs')
-      .select('*' as any)
+      .select()
       .eq('task_id', taskId)
       .order('created_at', { ascending: false });
     
     if (error) return [];
-    return (data || []).map(log => ({
+    return (data || []).map((log: any) => ({
       id: log.id,
       taskId: log.task_id,
       status: log.status,
@@ -241,14 +246,14 @@ export const webhookLogDb = {
     error: string | null;
     createdAt: string;
   }>> {
-    const { data, error } = await getSupabase()
+    const { data, error } = await getDb()
       .from('webhook_logs')
-      .select('*' as any)
+      .select()
       .order('created_at', { ascending: false })
       .limit(limit);
     
     if (error) return [];
-    return (data || []).map(log => ({
+    return (data || []).map((log: any) => ({
       id: log.id,
       taskId: log.task_id,
       status: log.status,
@@ -261,7 +266,7 @@ export const webhookLogDb = {
 // Health check
 export async function checkDatabaseHealth(): Promise<{ healthy: boolean; message: string }> {
   try {
-    const { error } = await getSupabase().from('tasks').select('id' as any).limit(1);
+    const { error } = await getDb().from('tasks').select('id').limit(1);
     if (error) throw error;
     return { healthy: true, message: 'Supabase connection is healthy' };
   } catch (error) {
