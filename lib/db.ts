@@ -1,7 +1,8 @@
+import { createClient } from '@supabase/supabase-js';
 import { v4 as uuidv4 } from 'uuid';
 import { TaskStatus, Priority } from './types';
 
-// Re-export types for backward compatibility
+// Re-export types
 export type { TaskStatus, Priority } from './types';
 
 export interface Task {
@@ -34,188 +35,178 @@ export interface UpdateTaskInput {
   assignee?: string;
 }
 
-// In-memory storage for Vercel compatibility
-const tasks: Map<string, Task> = new Map();
-const webhookLogs: Map<string, Array<{
-  id: number;
-  taskId: string;
-  status: string;
-  error: string | null;
-  createdAt: string;
-}>> = new Map();
+// Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-let logIdCounter = 1;
+let supabase: ReturnType<typeof createClient> | null = null;
 
-// Initialize with some sample data
-function initializeSampleData() {
-  if (tasks.size === 0) {
-    const sampleTasks: Task[] = [
-      {
-        id: uuidv4(),
-        title: 'Review Moltera AI pitch deck',
-        description: 'Check the latest version of the pitch deck',
-        status: 'backlog',
-        priority: 'high',
-        assignee: 'Lisa',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        webhookAttempts: 0,
-        lastWebhookError: null,
-        webhookDeliveredAt: null,
-      },
-      {
-        id: uuidv4(),
-        title: 'Research SiliconDB competitors',
-        description: 'Find 3-5 main competitors in the RAG space',
-        status: 'in-progress',
-        priority: 'high',
-        assignee: 'Lisa',
-        createdAt: new Date(Date.now() - 86400000).toISOString(),
-        updatedAt: new Date().toISOString(),
-        webhookAttempts: 1,
-        lastWebhookError: null,
-        webhookDeliveredAt: new Date().toISOString(),
-      },
-      {
-        id: uuidv4(),
-        title: 'Update HEARTBEAT.md with new tasks',
-        description: 'Add the new monitoring tasks to heartbeat',
-        status: 'done',
-        priority: 'medium',
-        assignee: 'Lisa',
-        createdAt: new Date(Date.now() - 172800000).toISOString(),
-        updatedAt: new Date().toISOString(),
-        webhookAttempts: 1,
-        lastWebhookError: null,
-        webhookDeliveredAt: new Date().toISOString(),
-      },
-    ];
-    
-    sampleTasks.forEach(task => tasks.set(task.id, task));
+function getSupabase() {
+  if (supabase) return supabase;
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error('Supabase URL and key must be set in environment variables');
   }
+  supabase = createClient(supabaseUrl, supabaseKey);
+  return supabase;
 }
-
-// Initialize on module load
-initializeSampleData();
 
 // Task operations
 export const taskDb = {
-  // Create a new task
   async create(input: CreateTaskInput): Promise<Task> {
     const id = uuidv4();
     const now = new Date().toISOString();
     
-    const task: Task = {
-      id,
-      title: input.title,
-      description: input.description || null,
-      status: input.status || 'backlog',
-      priority: input.priority || 'medium',
-      assignee: input.assignee || 'Lisa',
-      createdAt: now,
-      updatedAt: now,
-      webhookAttempts: 0,
-      lastWebhookError: null,
-      webhookDeliveredAt: null,
-    };
+    const { data, error } = await getSupabase()
+      .from('tasks')
+      .insert({
+        id,
+        title: input.title,
+        description: input.description || null,
+        status: input.status || 'backlog',
+        priority: input.priority || 'medium',
+        assignee: input.assignee || 'Lisa',
+        created_at: now,
+        updated_at: now,
+        webhook_attempts: 0,
+        last_webhook_error: null,
+        webhook_delivered_at: null,
+      })
+      .select()
+      .single();
     
-    tasks.set(id, task);
-    return task;
+    if (error) throw error;
+    return mapRowToTask(data);
   },
 
-  // Get task by ID
   async getById(id: string): Promise<Task | null> {
-    return tasks.get(id) || null;
+    const { data, error } = await getSupabase()
+      .from('tasks')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (error || !data) return null;
+    return mapRowToTask(data);
   },
 
-  // Get all tasks with optional filtering
   async getAll(filters?: { status?: TaskStatus; assignee?: string }): Promise<Task[]> {
-    let result = Array.from(tasks.values());
+    let query = getSupabase().from('tasks').select('*');
     
     if (filters?.status) {
-      result = result.filter(t => t.status === filters.status);
+      query = query.eq('status', filters.status);
     }
     
     if (filters?.assignee) {
-      result = result.filter(t => t.assignee === filters.assignee);
+      query = query.eq('assignee', filters.assignee);
     }
     
-    // Sort by createdAt descending
-    return result.sort((a, b) => 
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
+    const { data, error } = await query.order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    return (data || []).map(mapRowToTask);
   },
 
-  // Update task
   async update(id: string, input: UpdateTaskInput): Promise<Task | null> {
-    const existing = tasks.get(id);
-    if (!existing) return null;
-
-    const updated: Task = {
-      ...existing,
-      ...input,
-      id: existing.id, // Ensure ID doesn't change
-      updatedAt: new Date().toISOString(),
+    const updates: any = {
+      updated_at: new Date().toISOString(),
     };
     
-    tasks.set(id, updated);
-    return updated;
+    if (input.status !== undefined) updates.status = input.status;
+    if (input.title !== undefined) updates.title = input.title;
+    if (input.description !== undefined) updates.description = input.description;
+    if (input.priority !== undefined) updates.priority = input.priority;
+    if (input.assignee !== undefined) updates.assignee = input.assignee;
+    
+    const { data, error } = await getSupabase()
+      .from('tasks')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error || !data) return null;
+    return mapRowToTask(data);
   },
 
-  // Delete task
   async delete(id: string): Promise<boolean> {
-    return tasks.delete(id);
+    const { error } = await getSupabase()
+      .from('tasks')
+      .delete()
+      .eq('id', id);
+    
+    return !error;
   },
 
-  // Get tasks that need polling
   async getTasksNeedingPolling(minutesOld: number = 2): Promise<Task[]> {
     const cutoffTime = new Date(Date.now() - minutesOld * 60 * 1000).toISOString();
     
-    return Array.from(tasks.values()).filter(task => 
-      task.status === 'backlog' &&
-      task.createdAt < cutoffTime &&
-      task.webhookAttempts >= 1 &&
-      !task.webhookDeliveredAt
-    );
+    const { data, error } = await getSupabase()
+      .from('tasks')
+      .select('*')
+      .eq('status', 'backlog')
+      .lt('created_at', cutoffTime)
+      .gte('webhook_attempts', 1)
+      .is('webhook_delivered_at', null)
+      .order('created_at', { ascending: true });
+    
+    if (error) throw error;
+    return (data || []).map(mapRowToTask);
   },
 
-  // Increment webhook attempt counter
   async incrementWebhookAttempt(id: string, error?: string): Promise<void> {
-    const task = tasks.get(id);
-    if (task) {
-      task.webhookAttempts++;
-      task.lastWebhookError = error || null;
-      task.updatedAt = new Date().toISOString();
+    const { error: dbError } = await getSupabase()
+      .rpc('increment_webhook_attempt', { task_id: id, error_msg: error || null });
+    
+    if (dbError) {
+      // Fallback if RPC doesn't exist
+      const { data: task } = await getSupabase()
+        .from('tasks')
+        .select('webhook_attempts')
+        .eq('id', id)
+        .single();
+      
+      if (task) {
+        await getSupabase()
+          .from('tasks')
+          .update({
+            webhook_attempts: (task.webhook_attempts || 0) + 1,
+            last_webhook_error: error || null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', id);
+      }
     }
   },
 
-  // Mark webhook as delivered
   async markWebhookDelivered(id: string): Promise<void> {
-    const task = tasks.get(id);
-    if (task) {
-      task.webhookDeliveredAt = new Date().toISOString();
-      task.lastWebhookError = null;
-      task.updatedAt = new Date().toISOString();
-    }
+    const { error } = await getSupabase()
+      .from('tasks')
+      .update({
+        webhook_delivered_at: new Date().toISOString(),
+        last_webhook_error: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id);
+    
+    if (error) throw error;
   },
 };
 
 // Webhook log operations
 export const webhookLogDb = {
-  // Log a webhook attempt
   async log(taskId: string, status: 'success' | 'failed', error?: string): Promise<void> {
-    const logs = webhookLogs.get(taskId) || [];
-    logs.push({
-      id: logIdCounter++,
-      taskId,
-      status,
-      error: error || null,
-      createdAt: new Date().toISOString(),
-    });
-    webhookLogs.set(taskId, logs);
+    const { error: dbError } = await getSupabase()
+      .from('webhook_logs')
+      .insert({
+        task_id: taskId,
+        status,
+        error: error || null,
+        created_at: new Date().toISOString(),
+      });
+    
+    if (dbError) console.error('Failed to log webhook:', dbError);
   },
 
-  // Get logs for a task
   async getLogsForTask(taskId: string): Promise<Array<{
     id: number;
     taskId: string;
@@ -223,10 +214,22 @@ export const webhookLogDb = {
     error: string | null;
     createdAt: string;
   }>> {
-    return webhookLogs.get(taskId) || [];
+    const { data, error } = await getSupabase()
+      .from('webhook_logs')
+      .select('*')
+      .eq('task_id', taskId)
+      .order('created_at', { ascending: false });
+    
+    if (error) return [];
+    return (data || []).map(log => ({
+      id: log.id,
+      taskId: log.task_id,
+      status: log.status,
+      error: log.error,
+      createdAt: log.created_at,
+    }));
   },
 
-  // Get recent logs
   async getRecentLogs(limit: number = 100): Promise<Array<{
     id: number;
     taskId: string;
@@ -234,29 +237,60 @@ export const webhookLogDb = {
     error: string | null;
     createdAt: string;
   }>> {
-    const allLogs = Array.from(webhookLogs.values()).flat();
-    return allLogs
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .slice(0, limit);
+    const { data, error } = await getSupabase()
+      .from('webhook_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    
+    if (error) return [];
+    return (data || []).map(log => ({
+      id: log.id,
+      taskId: log.task_id,
+      status: log.status,
+      error: log.error,
+      createdAt: log.created_at,
+    }));
   },
 };
 
 // Health check
 export async function checkDatabaseHealth(): Promise<{ healthy: boolean; message: string }> {
-  return { 
-    healthy: true, 
-    message: 'In-memory database is operational' 
+  try {
+    const { error } = await getSupabase().from('tasks').select('id').limit(1);
+    if (error) throw error;
+    return { healthy: true, message: 'Supabase connection is healthy' };
+  } catch (error) {
+    return { 
+      healthy: false, 
+      message: error instanceof Error ? error.message : 'Unknown database error' 
+    };
+  }
+}
+
+// Initialize (no-op for Supabase, tables managed via migrations)
+export async function initializeDatabase(): Promise<void> {
+  // Tables should be created via Supabase dashboard or migrations
+  console.log('Supabase client initialized');
+}
+
+// Helper to map Supabase row to Task interface
+function mapRowToTask(row: any): Task {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    status: row.status,
+    priority: row.priority,
+    assignee: row.assignee,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    webhookAttempts: row.webhook_attempts || 0,
+    lastWebhookError: row.last_webhook_error,
+    webhookDeliveredAt: row.webhook_delivered_at,
   };
 }
 
-// Initialize database (no-op for in-memory)
-export async function initializeDatabase(): Promise<void> {
-  initializeSampleData();
-}
-
-// Export a mock db object for compatibility
-export const db = {
-  query: async () => ({ rows: [] }),
-};
-
-export default db;
+// Export Supabase client for direct access if needed
+export { getSupabase as db };
+export default getSupabase;

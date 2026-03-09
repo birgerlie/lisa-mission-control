@@ -12,6 +12,7 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.99.0",
     "@types/uuid": "^9.0.8",
     "better-sqlite3": "^12.6.2",
     "clsx": "^2.1.0",
