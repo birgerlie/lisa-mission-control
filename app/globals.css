@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --linear-bg: #0f1115;
+  --linear-surface: #1a1d29;
+  --linear-surfaceHover: #252a3c;
+  --linear-border: #2d3348;
+  --linear-primary: #5e6ad2;
+  --linear-primaryHover: #6872e3;
+  --linear-text: #f7f8f8;
+  --linear-textMuted: #8a8f98;
+  --linear-textSecondary: #5a5f6a;
+  --linear-accent: #f2c94c;
+  --linear-success: #4ade80;
+  --linear-warning: #fb923c;
+  --linear-danger: #f87171;
+  --linear-tooltip: #1e2230;
+  --linear-tooltipText: #e8e9eb;
+}
+
+body {
+  background-color: var(--linear-bg);
+  color: var(--linear-text);
+}
+
+@layer components {
+  .card-hover {
+    @apply transition-all duration-200;
+  }
+  
+  .card-hover:hover {
+    @apply bg-linear-surfaceHover shadow-lg;
+  }
+
+  /* Status badges */
+  .status-pending {
+    @apply bg-gray-500/20 text-gray-400;
+  }
+  
+  .status-in-progress {
+    @apply bg-blue-500/20 text-blue-400;
+  }
+  
+  .status-review {
+    @apply bg-yellow-500/20 text-yellow-400;
+  }
+  
+  .status-done {
+    @apply bg-green-500/20 text-green-400;
+  }
+
+  /* Priority badges */
+  .priority-high {
+    @apply bg-red-500/20 text-red-400;
+  }
+  
+  .priority-medium {
+    @apply bg-yellow-500/20 text-yellow-400;
+  }
+  
+  .priority-low {
+    @apply bg-blue-500/20 text-blue-400;
+  }
+
+  /* Border accent colors */
+  .border-linear-primary {
+    border-color: var(--linear-primary);
+  }
+  
+  .border-linear-success {
+    border-color: var(--linear-success);
+  }
+  
+  .border-linear-warning {
+    border-color: var(--linear-warning);
+  }
+  
+  .border-linear-textSecondary {
+    border-color: var(--linear-textSecondary);
+  }
+}
+
+@layer utilities {
+  .bg-linear-tooltip {
+    background-color: var(--linear-tooltip);
+  }
+  
+  .text-linear-tooltipText {
+    color: var(--linear-tooltipText);
+  }
+}
