@@ -60,7 +60,13 @@ export function createTask(
     assignee: assignee.trim(),
     priority,
     createdAt: getCurrentDateString(),
-    ...options,
+    description: options.description ?? null,
+    dueDate: options.dueDate,
+    completedAt: options.completedAt,
+    tags: options.tags,
+    webhookAttempts: options.webhookAttempts ?? 0,
+    lastWebhookError: options.lastWebhookError ?? null,
+    webhookDeliveredAt: options.webhookDeliveredAt ?? null,
   };
 }
 

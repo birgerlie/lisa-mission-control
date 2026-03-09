@@ -8,7 +8,7 @@ export type CronStatus = 'active' | 'paused' | 'error';
 export interface Task {
   id: string;
   title: string;
-  description?: string;
+  description: string | null;
   status: TaskStatus;
   assignee: string;
   priority: Priority;
@@ -16,9 +16,9 @@ export interface Task {
   createdAt: string;
   completedAt?: string;
   tags?: string[];
-  webhookAttempts?: number;
-  lastWebhookError?: string;
-  webhookDeliveredAt?: string;
+  webhookAttempts: number;
+  lastWebhookError: string | null;
+  webhookDeliveredAt: string | null;
 }
 
 export interface CronJob {

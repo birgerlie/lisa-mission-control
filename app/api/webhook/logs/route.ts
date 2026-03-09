@@ -18,9 +18,9 @@ export async function GET(request: NextRequest) {
 
     let logs;
     if (taskId) {
-      logs = webhookLogDb.getLogsForTask(taskId);
+      logs = await webhookLogDb.getLogsForTask(taskId);
     } else {
-      logs = webhookLogDb.getRecentLogs(limit);
+      logs = await webhookLogDb.getRecentLogs(limit);
     }
 
     return NextResponse.json({

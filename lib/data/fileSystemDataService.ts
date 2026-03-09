@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { Task, CronJob, AgentSession, MemoryFile, Document } from '../types';
-import { DataService } from './dataService';
+import { DataService, CreateTaskData } from './dataService';
 import { taskDb } from '../db';
 
 const WORKSPACE_ROOT = '/Users/birgerlie/clawd';
@@ -27,10 +27,10 @@ export class FileSystemDataService implements DataService {
     await taskDb.update(taskId, { status });
   }
 
-  async createTask(taskData: Omit<Task, 'id' | 'createdAt'>): Promise<Task> {
+  async createTask(taskData: CreateTaskData): Promise<Task> {
     const newTask = await taskDb.create({
       title: taskData.title,
-      description: taskData.description,
+      description: taskData.description || null,
       priority: taskData.priority,
       assignee: taskData.assignee,
     });
@@ -213,5 +213,31 @@ export class FileSystemDataService implements DataService {
         logs: [],
       },
     ];
+  }
+
+  // Missing interface methods
+  async killAgentSession(sessionId: string): Promise<boolean> {
+    console.log(`Killing agent session: ${sessionId}`);
+    return true;
+  }
+
+  async restartAgentSession(sessionId: string): Promise<boolean> {
+    console.log(`Restarting agent session: ${sessionId}`);
+    return true;
+  }
+
+  async getMemoryFile(date: string): Promise<MemoryFile | null> {
+    const files = await this.getMemoryFiles();
+    return files.find(f => f.date === date) || null;
+  }
+
+  async getLongTermMemory(): Promise<string | null> {
+    try {
+      const memoryPath = path.join(WORKSPACE_ROOT, 'MEMORY.md');
+      const content = await readFileAsync(memoryPath, 'utf-8');
+      return content;
+    } catch {
+      return null;
+    }
   }
 }

@@ -1,9 +1,20 @@
-import { Task, CronJob, AgentSession, MemoryFile, Document } from '../types';
+import { Task, CronJob, AgentSession, MemoryFile, Document, TaskStatus, Priority } from '../types';
+
+export interface CreateTaskData {
+  title: string;
+  description?: string;
+  status: TaskStatus;
+  assignee: string;
+  priority: Priority;
+  dueDate?: string;
+  completedAt?: string;
+  tags?: string[];
+}
 
 export interface DataService {
   getTasks(): Promise<Task[]>;
   updateTaskStatus(taskId: string, status: Task['status']): Promise<void>;
-  createTask(task: Omit<Task, 'id' | 'createdAt'>): Promise<Task>;
+  createTask(task: CreateTaskData): Promise<Task>;
   getCronJobs(): Promise<CronJob[]>;
   getAgentSessions(): Promise<AgentSession[]>;
   killAgentSession(sessionId: string): Promise<boolean>;
