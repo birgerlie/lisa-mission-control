@@ -25,6 +25,11 @@ export interface ClaudeSession {
   pid?: number;
 }
 
+// Helper function for database queries
+function db() {
+  return getDb() as any;
+}
+
 /**
  * Spawn a new Claude Code session as a background process
  */
@@ -36,7 +41,7 @@ export async function spawnClaudeSession(
   const startTime = new Date().toISOString();
   
   // Store in database first
-  const { data: session, error } = await getDb()
+  const { data: session, error } = await db()
     .from('agent_sessions')
     .insert({
       id,
@@ -75,7 +80,7 @@ export async function spawnClaudeSession(
   ], {
     cwd: workingDir,
     env: { ...process.env, HOME: '/Users/birgerlie' },
-    detached: false, // Keep attached so we can monitor
+    detached: false,
   });
 
   // Store process reference
@@ -106,7 +111,7 @@ export async function spawnClaudeSession(
 
   // Update with PID
   if (claudeProcess.pid) {
-    await getDb()
+    await db()
       .from('agent_sessions')
       .update({ pid: claudeProcess.pid })
       .eq('id', id);
@@ -137,7 +142,6 @@ export async function killClaudeSession(id: string): Promise<boolean> {
   if (process && !process.killed) {
     process.kill('SIGTERM');
     
-    // Force kill after 5 seconds if still running
     setTimeout(() => {
       if (!process.killed) {
         process.kill('SIGKILL');
@@ -147,8 +151,7 @@ export async function killClaudeSession(id: string): Promise<boolean> {
     activeProcesses.delete(id);
   }
 
-  // Update database
-  const { error } = await getDb()
+  const { error } = await db()
     .from('agent_sessions')
     .update({ 
       status: 'completed',
@@ -163,7 +166,7 @@ export async function killClaudeSession(id: string): Promise<boolean> {
  * Get all active sessions with live status
  */
 export async function getActiveSessions(): Promise<ClaudeSession[]> {
-  const { data, error } = await getDb()
+  const { data, error } = await db()
     .from('agent_sessions')
     .select()
     .order('created_at', { ascending: false });
@@ -187,10 +190,9 @@ export async function getActiveSessions(): Promise<ClaudeSession[]> {
  * Update session logs in database
  */
 async function updateSessionLogs(id: string, logs: string[]) {
-  // Keep only last 100 log entries to prevent DB bloat
   const recentLogs = logs.slice(-100);
   
-  await getDb()
+  await db()
     .from('agent_sessions')
     .update({ 
       logs: recentLogs,
@@ -203,7 +205,7 @@ async function updateSessionLogs(id: string, logs: string[]) {
  * Update session status
  */
 async function updateSessionStatus(id: string, status: string) {
-  await getDb()
+  await db()
     .from('agent_sessions')
     .update({ 
       status,
@@ -223,8 +225,7 @@ function startRuntimeTracking(id: string) {
       return;
     }
 
-    // Get current session to calculate runtime
-    const { data } = await getDb()
+    const { data } = await db()
       .from('agent_sessions')
       .select('start_time')
       .eq('id', id)
@@ -233,16 +234,14 @@ function startRuntimeTracking(id: string) {
     if (data) {
       const startTime = new Date(data.start_time).getTime();
       const runtime = Math.floor((Date.now() - startTime) / 1000);
+      const progress = Math.min(Math.floor((runtime / 300) * 100), 95);
       
-      // Simulate progress (in real implementation, parse from logs)
-      const progress = Math.min(Math.floor((runtime / 300) * 100), 95); // Cap at 95% until done
-      
-      await getDb()
+      await db()
         .from('agent_sessions')
         .update({ runtime, progress })
         .eq('id', id);
     }
-  }, 5000); // Update every 5 seconds
+  }, 5000);
 }
 
 /**
@@ -276,5 +275,4 @@ export async function spawnResearchTask(
   });
 }
 
-// Export for use in API routes
 export { activeProcesses };
