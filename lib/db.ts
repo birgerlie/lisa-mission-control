@@ -24,6 +24,7 @@ export interface CreateTaskInput {
   description?: string;
   priority?: Priority;
   assignee?: string;
+  status?: TaskStatus;
 }
 
 export interface UpdateTaskInput {
