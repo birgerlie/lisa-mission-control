@@ -13,8 +13,7 @@ import { sendWebhook, buildWebhookPayload } from '@/lib/webhook';
  * 3. Have at least 1 failed webhook attempt
  * 4. Have not been successfully delivered
  * 
- * Example cron configuration:
- * */5 * * * * curl -X POST http://localhost:3000/api/poll -H "Authorization: Bearer $CRON_SECRET"
+ * Example cron: Every 5 minutes call POST /api/poll
  */
 
 const CRON_SECRET = process.env.CRON_SECRET || process.env.WEBHOOK_SECRET || 'default-secret';
