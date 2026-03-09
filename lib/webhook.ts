@@ -182,3 +182,13 @@ export const webhookConfig = {
   timeout: WEBHOOK_TIMEOUT,
   secretLength: WEBHOOK_SECRET.length,
 };
+
+// Mock webhook log database for build compatibility
+export const webhookLogDb = {
+  log: (taskId: string, status: string, message: string) => {
+    console.log(`[WebhookLog] ${taskId} - ${status}: ${message}`);
+  },
+  getLogs: (taskId: string) => {
+    return [];
+  },
+};
