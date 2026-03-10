@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-const SILICONDB_URL = process.env.SILICONDB_URL || 'http://localhost:8643';
+const SILICONDB_URL = 'https://silver-plums-hear.loca.lt';
 
 // POST /api/search - Proxy search to SiliconDB
 export async function POST(request: NextRequest) {
