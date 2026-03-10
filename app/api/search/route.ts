@@ -13,7 +13,10 @@ export async function POST(request: NextRequest) {
 
     const res = await fetch(`${SILICONDB_URL}${endpoint}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'bypass-tunnel-reminder': '1'
+      },
       body: JSON.stringify(body),
     });
 
@@ -31,7 +34,9 @@ export async function POST(request: NextRequest) {
 // GET /api/search/status - Check SiliconDB connection
 export async function GET() {
   try {
-    const res = await fetch(`${SILICONDB_URL}/api/status`);
+    const res = await fetch(`${SILICONDB_URL}/api/status`, {
+      headers: { 'bypass-tunnel-reminder': '1' }
+    });
     const data = await res.json();
     return NextResponse.json({ success: true, ...data });
   } catch {
