@@ -40,6 +40,7 @@ export default function SearchPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [searchMode, setSearchMode] = useState<'hybrid' | 'vector' | 'text'>('hybrid');
   const [limit, setLimit] = useState(10);
+  const [namespace, setNamespace] = useState('_default');
   const [hasSearched, setHasSearched] = useState(false);
 
   useEffect(() => {
@@ -82,6 +83,7 @@ export default function SearchPage() {
         body: JSON.stringify({
           query: query.trim(),
           k: limit,
+          namespace,
           ...weights[searchMode],
         }),
       });
@@ -168,7 +170,7 @@ export default function SearchPage() {
         </button>
 
         {showAdvanced && (
-          <div className="mt-3 p-4 bg-linear-surface border border-linear-border rounded-xl flex items-center gap-6">
+          <div className="mt-3 p-4 bg-linear-surface border border-linear-border rounded-xl flex flex-wrap items-center gap-6">
             <div>
               <label className="text-xs text-linear-textMuted block mb-1">Search Mode</label>
               <div className="flex items-center bg-linear-bg rounded-lg p-1">
@@ -202,15 +204,33 @@ export default function SearchPage() {
                 <option value={50}>50</option>
               </select>
             </div>
+            <div>
+              <label className="text-xs text-linear-textMuted block mb-1">Namespace</label>
+              <input
+                type="text"
+                value={namespace}
+                onChange={(e) => setNamespace(e.target.value)}
+                placeholder="_default"
+                className="bg-linear-bg border border-linear-border rounded-lg px-3 py-1.5 text-xs text-linear-text w-32"
+              />
+            </div>
           </div>
         )}
       </form>
 
       {/* Error */}
       {error && (
-        <div className="mb-6 p-4 bg-linear-danger/10 border border-linear-danger/20 rounded-lg flex items-center gap-3 text-linear-danger">
-          <AlertCircle className="w-5 h-5" />
-          <span className="text-sm">{error}</span>
+        <div className="mb-6 p-4 bg-linear-danger/10 border border-linear-danger/20 rounded-lg flex items-center justify-between text-linear-danger">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-5 h-5" />
+            <span className="text-sm">{error}</span>
+          </div>
+          <button
+            onClick={checkStatus}
+            className="text-xs px-3 py-1.5 bg-linear-danger/20 hover:bg-linear-danger/30 rounded-lg transition-colors"
+          >
+            Retry Connection
+          </button>
         </div>
       )}
 
